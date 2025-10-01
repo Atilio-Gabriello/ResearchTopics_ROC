@@ -1,0 +1,35 @@
+{% set version = load_file_regex(load_file='src/pysubdisc/VERSION', regex_pattern='pySubDisc (?P<version>.+)').group('version') %}
+
+package:
+  name: pysubdisc
+  version: {{ version }}
+
+source:
+  path: ..
+
+build:
+  noarch: python
+  number: 0
+  script: python -m pip install --no-deps --ignore-installed .
+
+requirements:
+  host:
+    - python
+    - pip
+    - hatchling
+    - maven
+  run:
+    - python
+    - jpype1
+    - pandas
+    - scipy
+
+test:
+  source_files:
+    - tests/
+  imports:
+    - pysubdisc
+  commands:
+    - pytest -p no:faulthandler
+  requires:
+    - pytest

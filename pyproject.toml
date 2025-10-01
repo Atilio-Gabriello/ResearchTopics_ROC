@@ -1,0 +1,45 @@
+[project]
+name = "pysubdisc"
+authors = [
+  { name="Willem Jan Palenstijn", email="w.j.palenstijn@liacs.leidenuniv.nl" },
+]
+description="Python wrapper for SubDisc: Subgroup Discovery"
+readme = "README.md"
+requires-python = ">=3.7"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "JPype1",
+  "pandas",
+  "scipy",
+]
+dynamic = ["version"]
+
+[project.urls]
+"Homepage" = "https://github.com/SubDisc/pySubDisc"
+"Bug Tracker" = "https://github.com/SubDisc/pySubDisc/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/pysubdisc/VERSION"
+pattern = "^pySubDisc (?P<version>.+)"
+
+[tool.hatch.build]
+ignore-vcs = true
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+]
+include = [
+"src/pysubdisc/*.py",
+"src/pysubdisc/VERSION",
+"src/pysubdisc/jars/*.jar",
+"tests/*.py",
+"tests/*.txt"
+]

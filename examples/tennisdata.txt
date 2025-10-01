@@ -1,0 +1,23 @@
+Dataset,Target,Serveerder,Retourneerder,Surface,Game Score,Court Side,Length Point,Point End,First/Second serve,Serve/Volley,Position Return,Type Return
+1,0,Player X,Player Y,Gras,15-0,Ad,7.0,FE,2nd Opbouwend,No SV,Normaal,Body
+1,0,Player X,Player Y,Gras,30-15,Ad,10.0,UE,1st,No SV,Normaal,Stretch
+1,0,Player X,Player Y,Gras,30-30,Deuce,3.0,UE,2nd VvS,No SV,Normaal,Body
+1,0,Player X,Player Y,Gras,30-40,Ad,1.0,df,df,No SV,Punt voorbij,Punt voorbij
+1,0,Player X,Player Y,Gras,0-0,Deuce,5.0,UE,2nd Opbouwend,No SV,Normaal,Body
+1,0,Player X,Player Y,Gras,0-15,Ad,3.0,UE,1st,No SV,Normaal,Strike Zone
+1,0,Player X,Player Y,Gras,0-30,Deuce,10.0,Winner,1st,No SV,Normaal,Strike Zone
+1,1,Player X,Player Y,Gras,0-0,Deuce,10.0,Winner,1st,No SV,Normaal,Strike Zone
+1,1,Player X,Player Y,Gras,0-40,Ad,2.0,Return Error,1st,No SV,Normaal,Strike Zone
+1,1,Player X,Player Y,Gras,15-40,Deuce,4.0,FE,2nd Opbouwend,No SV,Normaal,Body
+1,1,Player X,Player Y,Gras,30-40,Ad,6.0,FE,2nd VvS,No SV,Normaal,Strike Zone
+0,0,Player Z,Player X,Gras,0-0,Deuce,3.0,Winner,1st,No SV,Normaal,Stretch
+0,0,Player Z,Player X,Gras,15-15,Deuce,2.0,Return Error,1st,No SV,Normaal,Stretch
+0,0,Player Z,Player X,Gras,30-15,Ad,3.0,Winner,1st,No SV,Normaal,Stretch
+0,0,Player Z,Player X,Gras,40-15,Deuce,8.0,FE,2nd VvS,No SV,Laten komen,Strike Zone
+0,0,Player Z,Player X,Gras,0-30,Deuce,7.0,Winner,1st,No SV,Normaal,Strike Zone
+0,0,Player Z,Player X,Gras,15-30,Ad,5.0,Winner,1st,SV,Normaal,Stretch
+0,0,Player Z,Player X,Gras,30-40,Ad,1.0,Serve Winner,2nd Opbouwend,No SV,Punt voorbij,Punt voorbij
+0,1,Player Z,Player X,Gras,15-0,Ad,10.0,UE,1st,No SV,Normaal,Strike Zone
+0,1,Player Z,Player X,Gras,0-0,Deuce,10.0,Winner,1st,No SV,Normaal,Strike Zone
+0,1,Player Z,Player X,Gras,0-15,Ad,3.0,UE,1st,No SV,Normaal,Strike Zone
+0,1,Player Z,Player X,Gras,30-30,Deuce,3.0,UE,2nd VvS,No SV,Laten komen,Strike Zone
