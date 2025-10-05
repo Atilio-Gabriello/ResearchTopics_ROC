@@ -1,4 +1,6 @@
 import argparse
+import json
+from datetime import datetime
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -176,7 +178,7 @@ def run_one(data: pd.DataFrame, alpha: float, depth: int, width: int,
     hull_png = out_dir / f'roc_hull_alpha_{alpha}.png'
     plt.savefig(hull_png)
     plt.close()
-    print(f"Saved {roc_csv}, {png_path} (env AUC={auc_env:.3f}), and {hull_png} (hull AUC={auc_h:.3f})")
+    print(f"Saved {roc_csv}, {png_path} (env AUC={auc_env:.3f}, width={width}), and {hull_png} (hull AUC={auc_h:.3f}, width={width})")
 
     # Compute table-2-like metrics
     def tpr_at_fpr(thresh: float) -> float:
@@ -229,6 +231,29 @@ def main():
     data = pd.read_csv(args.data)
     out_dir = Path(args.out)
 
+    def write_run_config(cfg_path: Path, *, engine: str, label: str, alpha: float, width: int):
+        cfg = {
+            'timestamp': datetime.now().isoformat(timespec='seconds'),
+            'dataset': str(Path(args.data).resolve()),
+            'strategy_engine': engine,
+            'strategy_label': label,
+            'alpha': alpha,
+            'depth': args.depth,
+            'width_used': width,
+            'min_coverage': args.min_coverage,
+            'nr_threads': args.nr_threads,
+            'post_processing': ('off' if args.no_postproc else ('count' if args.postproc_count is not None else 'auto')),
+            'post_processing_count': args.postproc_count,
+            'numeric_strategy': args.numeric_strategy,
+            'nr_bins': args.nr_bins,
+        }
+        try:
+            cfg_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(cfg_path, 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, indent=2)
+        except Exception as e:
+            print(f"Warning: failed to write run_config.json at {cfg_path}: {e}")
+
     # Strategy runs + collect summaries
     summaries = []
     comparison_rows = []
@@ -243,6 +268,17 @@ def main():
             strategy_name = strat_upper
             label_name = strat_upper
             width_to_use = args.width
+
+        # Print a concise header with effective settings for transparency
+        beam_width_strategies = { 'BEAM', 'ROC_BEAM' }
+        width_note = '' if strategy_name in beam_width_strategies else ' (width ignored by this strategy)'
+        alphas_desc = args.alphas if strategy_name == 'ROC_BEAM' else ([args.alphas[0]] if args.alphas else [0.5])
+        postproc_desc = 'off' if args.no_postproc else (f"count={args.postproc_count}" if args.postproc_count is not None else 'auto')
+        print(
+            f"Running {label_name} (engine={strategy_name}) | depth={args.depth} | width={width_to_use}{width_note} | "
+            f"alphas={alphas_desc} | min_cov={args.min_coverage} | threads={args.nr_threads or 'default'} | "
+            f"postproc={postproc_desc} | numeric={args.numeric_strategy or 'default'} | bins={args.nr_bins or 'default'}"
+        )
 
         if strategy_name == 'ROC_BEAM':
             for a in args.alphas:
@@ -267,6 +303,8 @@ def main():
                 s['strategy'] = label_name
                 summaries.append(s)
                 comparison_rows.append(s)
+                # provenance
+                write_run_config(out_dir / label_name / f'alpha_{a}' / 'run_config.json', engine=strategy_name, label=label_name, alpha=a, width=width_to_use)
         else:
             # Non-ROC strategies: run once (alpha provided but not used for search)
             a = args.alphas[0] if args.alphas else 0.5
@@ -289,6 +327,8 @@ def main():
             s['width_used'] = width_to_use
             s['strategy'] = label_name
             comparison_rows.append(s)
+            # provenance
+            write_run_config(out_dir / label_name / 'run_config.json', engine=strategy_name, label=label_name, alpha=a, width=width_to_use)
 
     # Combined overlay of ROC curves across alphas (ROC_BEAM only if available)
     plt.figure(figsize=(8, 6))
@@ -301,8 +341,8 @@ def main():
             if not roc_csv.exists():
                 continue
         roc_df = pd.read_csv(roc_csv)
-        xs, ys, auc = _build_curve(roc_df)
-        plt.plot(xs, ys, lw=2, label=f'alpha={a} (AUC={auc:.3f})')
+    xs, ys, auc = _build_curve(roc_df)
+    plt.plot(xs, ys, lw=2, label=f'alpha={a} (AUC={auc:.3f}, width={args.width})')
     plt.plot([0, 1], [0, 1], 'k--', label='Random')
     plt.xlim(0, 1)
     plt.ylim(0, 1)
@@ -315,7 +355,7 @@ def main():
     overlay_png = out_dir / 'roc_overlay.png'
     plt.savefig(overlay_png)
     plt.close()
-    print(f"Saved overlay plot {overlay_png}")
+    print(f"Saved overlay plot {overlay_png} (ROC_BEAM width={args.width})")
 
     # Write a table2-like summary CSV for ROC_BEAM alphas and a strategy comparison table
     if summaries:

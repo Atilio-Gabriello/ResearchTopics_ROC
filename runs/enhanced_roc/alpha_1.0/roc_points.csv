@@ -1,0 +1,51 @@
+FPR,TPR,Coverage,Quality,Conditions
+0.30859375,0.8405172413793104,432,0.8405172413793104,age >= 24.0 AND marital-status = 'Married-civ-spouse'
+0.3229166666666667,0.8405172413793104,443,0.8405172413793104,marital-status = 'Married-civ-spouse'
+0.2669270833333333,0.8232758620689655,396,0.8232758620689655,age >= 29.0 AND marital-status = 'Married-civ-spouse'
+0.2916666666666667,0.8189655172413793,414,0.8189655172413793,hours-per-week >= 26.0 AND marital-status = 'Married-civ-spouse'
+0.2721354166666667,0.8146551724137931,398,0.8146551724137931,education-num >= 9.0 AND marital-status = 'Married-civ-spouse'
+0.22265625,0.7974137931034483,356,0.7974137931034483,education-num >= 9.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse'
+0.23828125,0.7844827586206896,365,0.7844827586206896,hours-per-week >= 26.0 AND age >= 30.0 AND marital-status = 'Married-civ-spouse'
+0.22265625,0.7543103448275862,346,0.7543103448275862,age >= 24.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND fnlwgt >= 82465.0
+0.2265625,0.7543103448275862,349,0.7543103448275862,age >= 24.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND age <= 58.0
+0.21744791666666666,0.75,341,0.75,age >= 24.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND hours-per-week >= 40.0
+0.2578125,0.75,372,0.75,age >= 24.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND capital-loss <= 0.0
+0.18359375,0.7327586206896551,311,0.7327586206896551,education-num >= 9.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND fnlwgt >= 83311.0
+0.18880208333333334,0.7327586206896551,315,0.7327586206896551,education-num >= 9.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND age <= 58.0
+0.23177083333333334,0.7327586206896551,348,0.7327586206896551,age >= 24.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND race = 'White'
+0.21354166666666666,0.728448275862069,333,0.728448275862069,age >= 29.0 AND hours-per-week >= 36.0 AND marital-status = 'Married-civ-spouse' AND hours-per-week <= 60.0
+0.21614583333333334,0.728448275862069,335,0.728448275862069,education-num >= 9.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND capital-loss <= 0.0
+0.23307291666666666,0.728448275862069,348,0.728448275862069,age >= 24.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND sex = 'Male'
+0.23307291666666666,0.728448275862069,348,0.728448275862069,age >= 24.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND native-country = 'United-States'
+0.22265625,0.7241379310344828,339,0.7241379310344828,education-num >= 9.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND education-num <= 14.0
+0.24609375,0.7241379310344828,357,0.7241379310344828,age >= 24.0 AND marital-status = 'Married-civ-spouse' AND hours-per-week >= 40.0 AND hours-per-week <= 60.0
+0.26171875,0.7241379310344828,369,0.7241379310344828,age >= 24.0 AND relationship = 'Husband'
+0.26171875,0.7241379310344828,369,0.7241379310344828,age >= 24.0 AND marital-status = 'Married-civ-spouse' AND sex = 'Male' AND relationship = 'Husband'
+0.2708333333333333,0.7241379310344828,376,0.7241379310344828,relationship = 'Husband'
+0.24609375,0.7198275862068966,356,0.7198275862068966,hours-per-week >= 26.0 AND relationship = 'Husband'
+0.24609375,0.7198275862068966,356,0.7198275862068966,hours-per-week >= 26.0 AND marital-status = 'Married-civ-spouse' AND sex = 'Male' AND relationship = 'Husband'
+0.19921875,0.7155172413793104,319,0.7155172413793104,hours-per-week >= 26.0 AND age >= 30.0 AND marital-status = 'Married-civ-spouse' AND fnlwgt >= 85815.0
+0.20833333333333334,0.7155172413793104,326,0.7155172413793104,age >= 24.0 AND marital-status = 'Married-civ-spouse' AND age >= 31.0 AND hours-per-week >= 40.0
+0.21354166666666666,0.7155172413793104,330,0.7155172413793104,age >= 24.0 AND marital-status = 'Married-civ-spouse' AND age >= 31.0 AND fnlwgt >= 84154.0
+0.22916666666666666,0.7155172413793104,342,0.7155172413793104,hours-per-week >= 26.0 AND age >= 30.0 AND marital-status = 'Married-civ-spouse' AND capital-loss <= 0.0
+0.23046875,0.7155172413793104,343,0.7155172413793104,age >= 29.0 AND relationship = 'Husband'
+0.23046875,0.7155172413793104,343,0.7155172413793104,age >= 24.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND relationship = 'Husband'
+0.23046875,0.7155172413793104,343,0.7155172413793104,age >= 29.0 AND marital-status = 'Married-civ-spouse' AND sex = 'Male' AND relationship = 'Husband'
+0.23567708333333334,0.7155172413793104,347,0.7155172413793104,age >= 24.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND fnlwgt <= 285854.0
+0.18229166666666666,0.7112068965517241,305,0.7112068965517241,age >= 29.0 AND hours-per-week >= 36.0 AND marital-status = 'Married-civ-spouse' AND fnlwgt >= 81973.0
+0.19270833333333334,0.7112068965517241,313,0.7112068965517241,education-num >= 9.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND race = 'White'
+0.20052083333333334,0.7112068965517241,319,0.7112068965517241,education-num >= 9.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND native-country = 'United-States'
+0.21614583333333334,0.7112068965517241,331,0.7112068965517241,age >= 24.0 AND marital-status = 'Married-civ-spouse' AND age >= 31.0 AND age <= 58.0
+0.18359375,0.7068965517241379,305,0.7068965517241379,age >= 29.0 AND fnlwgt >= 80145.0 AND marital-status = 'Married-civ-spouse' AND hours-per-week >= 38.0
+0.20572916666666666,0.7068965517241379,322,0.7068965517241379,hours-per-week >= 26.0 AND age >= 30.0 AND marital-status = 'Married-civ-spouse' AND age <= 57.0
+0.20833333333333334,0.7068965517241379,324,0.7068965517241379,hours-per-week >= 26.0 AND age >= 30.0 AND marital-status = 'Married-civ-spouse' AND sex = 'Male'
+0.20963541666666666,0.7068965517241379,325,0.7068965517241379,age >= 29.0 AND marital-status = 'Married-civ-spouse' AND hours-per-week >= 40.0 AND hours-per-week <= 60.0
+0.22395833333333334,0.7068965517241379,336,0.7068965517241379,age >= 24.0 AND marital-status = 'Married-civ-spouse' AND age <= 58.0 AND fnlwgt >= 87418.0
+0.24869791666666666,0.7068965517241379,355,0.7068965517241379,age >= 24.0 AND marital-status = 'Married-civ-spouse' AND age >= 31.0 AND capital-loss <= 0.0
+0.25,0.7068965517241379,356,0.7068965517241379,age >= 24.0 AND marital-status = 'Married-civ-spouse' AND fnlwgt >= 84154.0 AND capital-loss <= 0.0
+0.18098958333333334,0.7025862068965517,302,0.7025862068965517,age >= 29.0 AND marital-status = 'Married-civ-spouse' AND fnlwgt >= 82465.0 AND hours-per-week >= 38.0
+0.18359375,0.7025862068965517,304,0.7025862068965517,education-num >= 9.0 AND marital-status = 'Married-civ-spouse' AND age <= 57.0 AND age >= 30.0
+0.19270833333333334,0.7025862068965517,311,0.7025862068965517,education-num >= 9.0 AND age >= 29.0 AND marital-status = 'Married-civ-spouse' AND sex = 'Male'
+0.21354166666666666,0.7025862068965517,327,0.7025862068965517,age >= 24.0 AND marital-status = 'Married-civ-spouse' AND fnlwgt >= 84154.0 AND hours-per-week >= 40.0
+0.21354166666666666,0.7025862068965517,327,0.7025862068965517,age >= 29.0 AND hours-per-week >= 36.0 AND marital-status = 'Married-civ-spouse' AND capital-loss <= 0.0
+0.21484375,0.7025862068965517,328,0.7025862068965517,age >= 24.0 AND marital-status = 'Married-civ-spouse' AND hours-per-week >= 40.0 AND fnlwgt >= 82465.0
