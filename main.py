@@ -1,6 +1,3 @@
-import pysubdisc as subdisc
-import pandas as pd
-
 import pysubdisc
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -8,32 +5,32 @@ import matplotlib.pyplot as plt
 # Load the data
 data = pd.read_csv('./tests/adult.txt')
 
-# Binarize the target variable for clarity (assuming 'gr50K' is the positive class)
-data['target_binary'] = (data['target'] == 'gr50K').astype(int)
+# Define ground-truth labels (without adding a column to the search table)
+y_true = (data['target'] == 'gr50K')
 
-# 1. Perform Subgroup Discovery
+# 1. Perform Subgroup Discovery (ROC search)
 sd = pysubdisc.singleNominalTarget(data, 'target', 'gr50K')
+sd.searchStrategy = 'ROC_BEAM'  # use ROC-based beam search
+sd.searchDepth = 4
 sd.run()
 results = sd.asDataFrame()
 
 # Data for ROC plot
 roc_points = []
 
-# Ground truth
-y_true = data['target_binary']
 P = y_true.sum()
 N = len(y_true) - P
 
 # 2. & 3. Calculate TPR and FPR for each subgroup
 for i in range(len(results)):
-    subgroup_members = sd.getSubgroupMembers(i)
-    
-    # Predictions for this subgroup
-    y_pred = subgroup_members.astype(int)
-    
+    subgroup_members = sd.getSubgroupMembers(i)  # boolean mask
+
+    # Predictions for this subgroup as boolean
+    y_pred = subgroup_members.astype(bool)
+
     TP = (y_true & y_pred).sum()
-    FP = (~y_true.astype(bool) & y_pred).sum()
-    
+    FP = ((~y_true) & y_pred).sum()
+
     TPR = TP / P if P > 0 else 0
     FPR = FP / N if N > 0 else 0
     

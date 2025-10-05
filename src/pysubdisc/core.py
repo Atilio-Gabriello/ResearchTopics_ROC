@@ -117,7 +117,7 @@ class SubgroupDiscovery(object):
     """Return the type of the target (as string)."""
     return str(self._targetConcept.getTargetType())
 
-  def _initSearchParameters(self, *, qualityMeasure='CORTANA_QUALITY', searchDepth=1, minimumCoverage=None, maximumCoverageFraction=0.9, minimumSupport=0, maximumSubgroups=1000, filterSubgroups=True, minimumImprovement=0.0, maximumTime=0, searchStrategy='BEAM', nominalSets=False, numericOperatorSetting='NORMAL', numericStrategy='NUMERIC_BINS', searchStrategyWidth=100, nrBins=8, nrThreads=None):
+  def _initSearchParameters(self, *, qualityMeasure='CORTANA_QUALITY', searchDepth=1, minimumCoverage=None, maximumCoverageFraction=0.9, minimumSupport=0, maximumSubgroups=1000, filterSubgroups=True, minimumImprovement=0.0, maximumTime=0, searchStrategy='BEAM', nominalSets=False, numericOperatorSetting='NORMAL', numericStrategy='NUMERIC_BINS', searchStrategyWidth=100, nrBins=8, nrThreads=None, alpha=0.5, beta=1.0, postProcessingDoAutoRun=True, postProcessingCount=20, overallRankingLoss=0.0, beamSeed=None):
     """
     Initialize search parameters for subgroup discovery.
     All arguments are configurable search settings.
@@ -200,6 +200,36 @@ class SubgroupDiscovery(object):
     sp.setFilterSubgroups(self.filterSubgroups)
     sp.setNrBins(self.nrBins)
     sp.setNrThreads(self.nrThreads)
+
+    # ROC/beam specific settings if present
+    try:
+      sp.setAlpha(self.alpha)
+    except AttributeError:
+      pass
+    try:
+      sp.setBeta(self.beta)
+    except AttributeError:
+      pass
+    try:
+      sp.setPostProcessingDoAutoRun(self.postProcessingDoAutoRun)
+      sp.setPostProcessingCount(self.postProcessingCount)
+    except AttributeError:
+      pass
+    try:
+      sp.setOverallRankingLoss(self.overallRankingLoss)
+    except AttributeError:
+      pass
+    # Beam seed optional (expects Java list); accept Python iterables
+    try:
+      if getattr(self, 'beamSeed', None):
+        from java.util import ArrayList
+        L = ArrayList()
+        for x in self.beamSeed:
+          L.add(x)
+        sp.setBeamSeed(L)
+    except Exception:
+      # Non-fatal if beam seed isn't provided or conversion fails
+      pass
 
     return sp
 

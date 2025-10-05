@@ -44,6 +44,46 @@ print(sd.asDataFrame())
 
 Some detailed examples can be found in the /examples folder.
 
+## How to run (ROC experiments)
+
+The repository includes an experiment driver that mines subgroups, builds ROC curves, and writes plots/tables for easy comparison across strategies.
+
+Quick demo (runs a minimal example):
+
+```powershell
+python .\main.py
+```
+
+Full ROC sweep and strategy comparison (recommended):
+
+```powershell
+python .\experiments\roc_sweep.py --data .\tests\adult.txt --alphas 0.3 0.5 0.7 --depth 4 --width 50 --nr-threads 1 --no-postproc --strategies ROC_BEAM WIDE_BEAM BEAM BEST_FIRST --wide-width 200 --out .\runs\roc
+```
+
+Notes:
+- Use `--nr-threads 1` and `--no-postproc` for more deterministic runs.
+- WIDE_BEAM uses the BEAM engine with a larger width (`--wide-width`).
+- You can change dataset via `--data`, beam `--width`, search `--depth`, and `--min-coverage`.
+- Numeric handling can be tweaked with `--numeric-strategy` and `--nr-bins`.
+
+Outputs (default `--out .\runs\roc`):
+- `roc_overlay.png` — overlay of ROC curves.
+- `table2_like_summary.csv` — per-alpha summary (ROC_BEAM), including AUC and TPR@FPR thresholds.
+- `strategy_comparison.csv` — one table comparing strategies (ROC_BEAM, WIDE_BEAM, BEAM, BEST_FIRST).
+- Per‑strategy folders with CSVs/PNGs, e.g.:
+	- `ROC_BEAM/alpha_*/roc_points_alpha_*.csv`, `roc_alpha_*.png`, `roc_hull_alpha_*.png`
+	- `WIDE_BEAM/alpha_*/...`, `BEAM/alpha_*/...`, `BEST_FIRST/alpha_*/...`
+
+Examples of single‑alpha runs:
+
+```powershell
+# Single alpha, default BEAM width 50
+python .\experiments\roc_sweep.py --data .\tests\adult.txt --alphas 0.5 --depth 4 --width 50 --nr-threads 1 --no-postproc --strategies ROC_BEAM WIDE_BEAM BEAM BEST_FIRST --wide-width 200 --out .\runs\roc
+
+# Explore larger beam width for ROC_BEAM only
+python .\experiments\roc_sweep.py --data .\tests\adult.txt --alphas 0.5 --depth 4 --width 100 --out .\runs\roc
+```
+
 ## Documentation
 
 The SubDisc documentation might be of help for working with pySubDisc: https://github.com/SubDisc/SubDisc/wiki.
