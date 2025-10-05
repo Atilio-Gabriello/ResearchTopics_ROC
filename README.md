@@ -84,6 +84,27 @@ python .\experiments\roc_sweep.py --data .\tests\adult.txt --alphas 0.5 --depth 
 python .\experiments\roc_sweep.py --data .\tests\adult.txt --alphas 0.5 --depth 4 --width 100 --out .\runs\roc
 ```
 
+## Example results (Adult dataset, alpha = 0.5)
+
+Settings used for the comparison below:
+
+- Data: `tests/adult.txt`
+- Search: `--depth 4 --width 50`
+- Determinism: `--nr-threads 1 --no-postproc`
+- Strategies: `ROC_BEAM WIDE_BEAM BEAM BEST_FIRST` with `--wide-width 200`
+- Output folder: `runs/roc`
+
+Results summary (from `runs/roc/strategy_comparison.csv`):
+
+| Strategy   | Alpha | Width used | Subgroups | AUC_env   | AUC_hull  | TPR@FPR<=0.05 | TPR@FPR<=0.10 | TPR@FPR<=0.20 | max_TPR  | min_FPR  |
+|------------|:-----:|-----------:|----------:|----------:|----------:|--------------:|--------------:|--------------:|---------:|---------:|
+| ROC_BEAM   | 0.5   | 50         | 204       | 0.7538922 | 0.8527299 | 0.4353448     | 0.5646552     | 0.6853448     | 1.000000 | 0.028646 |
+| WIDE_BEAM  | 0.5   | 200        | 770       | 0.7973941 | 0.8264244 | 0.0000000     | 0.5732759     | 0.7327586     | 0.840517 | 0.070313 |
+| BEAM       | 0.5   | 50         | 643       | 0.8003687 | 0.8262953 | 0.0000000     | 0.5646552     | 0.7112069     | 0.857759 | 0.055990 |
+| BEST_FIRST | 0.5   | 50         | 830       | 0.8146299 | 0.8255236 | 0.0000000     | 0.5732759     | 0.7500000     | 0.840517 | 0.082031 |
+
+Overlay plot of the ROC curves: ![ROC overlay](runs/roc/roc_overlay.png)
+
 ## Documentation
 
 The SubDisc documentation might be of help for working with pySubDisc: https://github.com/SubDisc/SubDisc/wiki.
