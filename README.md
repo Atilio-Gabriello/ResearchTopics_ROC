@@ -38,6 +38,9 @@ pip install pysubdisc
 # Basic run with multiple alpha values
 python true_roc_search.py --data ./tests/adult.txt --target target --alphas 0.3 0.5 0.7 --depth 3 --min-coverage 50
 
+# Pure ROC search (without alpha parameter, using TPR - FPR quality measure)
+python true_roc_search.py --data ./tests/adult.txt --target target --pure-roc --depth 4 --min-coverage 50
+
 # Full alpha range analysis
 python true_roc_search.py --data ./tests/adult.txt --target target --alphas 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 --depth 3 --min-coverage 50
 ```
@@ -73,6 +76,16 @@ python comparison_analysis.py
 - **Adaptive Behavior**: True ROC automatically adjusts width based on ROC quality
 - **Research Alignment**: Matches Table 2 behavior from research papers (adaptive widths 1-37)
 - **Efficiency**: True ROC explores more candidates but keeps fewer final results
+
+### Pure ROC vs Alpha-ROC Comparison
+
+| Mode | Quality Measure | Width | AUC | Best Quality | Description |
+|------|-----------------|-------|-----|--------------|-------------|
+| **Pure ROC** | TPR - FPR | **11** | 0.752 | 0.423 | Traditional ROC analysis |
+| **Alpha-ROC (α=0.7)** | 0.7×TPR + 0.3×(1-FPR) | **19** | 0.467 | 0.732 | Weighted quality measure |
+
+- **Pure ROC**: Uses distance above diagonal (TPR - FPR) as traditional ROC literature suggests
+- **Alpha-ROC**: Uses weighted combination allowing tuning between sensitivity and specificity
 
 ### Algorithm Comparison Visualization
 

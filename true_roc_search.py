@@ -20,7 +20,7 @@ import json
 import os
 from pathlib import Path
 import matplotlib.pyplot as plt
-from scipy.spatial import ConvexHull
+from scipy.spatial import ConvexHull, KDTree
 import time
 
 def load_data(filepath):
@@ -70,7 +70,19 @@ def calculate_subgroup_stats(data, conditions, target_col):
     target_values = data[target_col].unique()
     if len(target_values) == 2:
         # Convert to binary (1 for positive class, 0 for negative)
-        positive_class = target_values[0]  # Take first unique value as positive
+        # For income data, positive class should be high income (gr50K, >50K, etc.)
+        positive_class = None
+        for val in target_values:
+            if 'gr' in str(val).lower() or '>50' in str(val) or '1' in str(val):
+                positive_class = val
+                break
+        
+        # If no obvious positive class, use the less frequent class (minority class)
+        if positive_class is None:
+            value_counts = data[target_col].value_counts()
+            positive_class = value_counts.idxmin()  # Less frequent class
+        
+        print(f"Using '{positive_class}' as positive class (high income)")
         data_binary = (data[target_col] == positive_class).astype(int)
         subgroup_binary = (subgroup_data[target_col] == positive_class).astype(int)
         
@@ -117,19 +129,25 @@ def calculate_subgroup_stats(data, conditions, target_col):
             'lift': target_mean / population_mean if population_mean > 0 else 0
         }
 
-def roc_quality_measure(tpr, fpr, alpha):
+def roc_quality_measure(tpr, fpr, alpha=None):
     """
-    Calculate ROC quality measure: α * TPR + (1-α) * (1-FPR)
+    Calculate ROC quality measure. If alpha is provided, uses weighted measure.
+    If alpha is None, uses distance from diagonal (ROC improvement).
     
     Args:
         tpr: True Positive Rate
         fpr: False Positive Rate  
-        alpha: Weight parameter [0,1]
+        alpha: Weight parameter [0,1] (optional)
     
     Returns:
         ROC quality score
     """
-    return alpha * tpr + (1 - alpha) * (1 - fpr)
+    if alpha is not None:
+        return alpha * tpr + (1 - alpha) * (1 - fpr)
+    else:
+        # Pure ROC quality: distance above diagonal (TPR - FPR)
+        # This measures how much better than random the classifier is
+        return tpr - fpr
 
 def is_on_roc_hull(points):
     """
@@ -175,16 +193,16 @@ def is_on_roc_hull(points):
         # If hull calculation fails, keep all points
         return [True] * len(points)
 
-def adaptive_roc_pruning(subgroups, alpha, quality_threshold=None):
+def adaptive_roc_pruning(subgroups, alpha=None, quality_threshold=None):
     """
     Implement true ROC search pruning with adaptive width.
     
     Keep only subgroups that are on the ROC convex hull or significantly 
-    contribute to ROC performance.
+    contribute to ROC performance. If alpha is None, uses pure ROC approach.
     
     Args:
         subgroups: List of subgroup statistics
-        alpha: ROC quality weight parameter
+        alpha: ROC quality weight parameter (optional, for alpha-ROC search)
         quality_threshold: Minimum quality to keep (auto-calculated if None)
     
     Returns:
@@ -200,10 +218,21 @@ def adaptive_roc_pruning(subgroups, alpha, quality_threshold=None):
     # Sort by ROC quality (descending)
     subgroups.sort(key=lambda x: x['roc_quality'], reverse=True)
     
+    # Filter out subgroups below diagonal (worse than random) for pure ROC
+    if alpha is None:
+        subgroups = [sg for sg in subgroups if sg['roc_quality'] > 0]
+        if not subgroups:
+            print("No subgroups better than random found!")
+            return []
+    
     # Auto-calculate quality threshold if not provided
     if quality_threshold is None:
         qualities = [sg['roc_quality'] for sg in subgroups]
-        quality_threshold = np.percentile(qualities, 90)  # Keep top 10%
+        if alpha is None:
+            # For pure ROC, be more selective
+            quality_threshold = np.percentile(qualities, 80)  # Keep top 20%
+        else:
+            quality_threshold = np.percentile(qualities, 90)  # Keep top 10%
     
     # Extract ROC points
     roc_points = [(sg['fpr'], sg['tpr']) for sg in subgroups]
@@ -236,7 +265,7 @@ def adaptive_roc_pruning(subgroups, alpha, quality_threshold=None):
             kept_subgroups.append(sg)
     
     # Additional filtering: remove redundant subgroups with very similar ROC points
-    if len(kept_subgroups) > 50:  # If still too many, do distance-based pruning
+    if len(kept_subgroups) > 30:  # More aggressive for pure ROC
         filtered_subgroups = []
         for sg in kept_subgroups:
             # Check if this subgroup is too similar to already kept subgroups
@@ -253,12 +282,13 @@ def adaptive_roc_pruning(subgroups, alpha, quality_threshold=None):
                 filtered_subgroups.append(sg)
             
             # Stop if we have enough diverse subgroups
-            if len(filtered_subgroups) >= 30:
+            if len(filtered_subgroups) >= 20:  # Smaller limit for pure ROC
                 break
         
         kept_subgroups = filtered_subgroups
     
-    print(f"Adaptive ROC pruning: {len(subgroups)} → {len(kept_subgroups)} subgroups (width: {len(kept_subgroups)})")
+    search_type = "Pure ROC" if alpha is None else f"Alpha-ROC (α={alpha})"
+    print(f"{search_type} pruning: {len(subgroups)} → {len(kept_subgroups)} subgroups (width: {len(kept_subgroups)})")
     
     return kept_subgroups
 
@@ -277,11 +307,23 @@ def generate_candidates(data, target_col, current_subgroups, depth, min_coverage
         List of candidate subgroup statistics
     """
     candidates = []
+    subgroups = []
     
-    # Get numeric columns for conditions
+    # Get numeric and categorical columns for conditions
     numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+    categorical_cols = data.select_dtypes(include=['object']).columns.tolist()
+    
+    # Remove target column from both lists
     if target_col in numeric_cols:
         numeric_cols.remove(target_col)
+    if target_col in categorical_cols:
+        categorical_cols.remove(target_col)
+    
+    # Limit categorical columns to those with reasonable number of unique values
+    categorical_cols = [col for col in categorical_cols 
+                       if data[col].nunique() <= 20]  # Avoid explosion
+    
+    all_cols = numeric_cols + categorical_cols
     
     # Generate candidates from current subgroups
     for sg in current_subgroups:
@@ -291,62 +333,132 @@ def generate_candidates(data, target_col, current_subgroups, depth, min_coverage
             continue
         
         # Try adding new conditions
-        for col in numeric_cols:
+        for col in all_cols:
             # Skip if column already has a condition
             existing_cols = [c[0] for c in conditions]
             if col in existing_cols:
                 continue
             
-            # Get column statistics
-            col_values = data[col].dropna()
-            if len(col_values) == 0:
-                continue
+            # Handle numeric columns
+            if col in numeric_cols:
+                col_values = data[col].dropna()
+                if len(col_values) == 0:
+                    continue
+                
+                # Generate threshold candidates
+                percentiles = [25, 50, 75]
+                thresholds = []
+                
+                for p in percentiles:
+                    thresh = np.percentile(col_values, p)
+                    thresholds.append(thresh)
+                
+                # Add min/max for diversity
+                thresholds.extend([col_values.min(), col_values.max()])
+                thresholds = sorted(list(set(thresholds)))
+                
+                # Create candidates with different operators
+                for thresh in thresholds[:3]:  # Limit to avoid explosion
+                    for op in ['>=', '<=', '==', '!=']:
+                        new_conditions = conditions + [(col, op, thresh)]
+                        
+                        # Calculate statistics for candidate
+                        candidate_stats = calculate_subgroup_stats(data, new_conditions, target_col)
+
+                        if (candidate_stats and 
+                            candidate_stats['coverage'] >= min_coverage and
+                            'tpr' in candidate_stats and 'fpr' in candidate_stats):
+                            subgroups.append([candidate_stats.get('fpr').tolist(), candidate_stats.get('tpr').tolist()])
+                            candidates.append(candidate_stats)
             
-            # Generate threshold candidates
-            percentiles = [25, 50, 75]
-            thresholds = []
-            
-            for p in percentiles:
-                thresh = np.percentile(col_values, p)
-                thresholds.append(thresh)
-            
-            # Add min/max for diversity
-            thresholds.extend([col_values.min(), col_values.max()])
-            thresholds = sorted(list(set(thresholds)))
-            
-            # Create candidates with different operators
-            for thresh in thresholds[:3]:  # Limit to avoid explosion
-                for op in ['>=', '<=']:
-                    new_conditions = conditions + [(col, op, thresh)]
-                    
-                    # Calculate statistics for candidate
-                    candidate_stats = calculate_subgroup_stats(data, new_conditions, target_col)
-                    
-                    if (candidate_stats and 
-                        candidate_stats['coverage'] >= min_coverage and
-                        'tpr' in candidate_stats and 'fpr' in candidate_stats):
-                        candidates.append(candidate_stats)
-    
+            # Handle categorical columns
+            elif col in categorical_cols:
+                unique_values = data[col].dropna().unique()
+                if len(unique_values) == 0:
+                    continue
+                
+                # Limit number of values to avoid explosion
+                if len(unique_values) > 10:
+                    # Use top 10 most frequent values
+                    top_values = data[col].value_counts().head(10).index.tolist()
+                    unique_values = top_values
+                
+                # Create candidates with == and != operators
+                for val in unique_values:
+                    for op in ['==', '!=']:
+                        new_conditions = conditions + [(col, op, val)]
+                        
+                        # Calculate statistics for candidate
+                        candidate_stats = calculate_subgroup_stats(data, new_conditions, target_col)
+
+                        if (candidate_stats and 
+                            candidate_stats['coverage'] >= min_coverage and
+                            'tpr' in candidate_stats and 'fpr' in candidate_stats):
+                            subgroups.append([candidate_stats.get('fpr').tolist(), candidate_stats.get('tpr').tolist()])
+                            candidates.append(candidate_stats)
+                    # if (candidate_stats['tpr'] >= candidate_stats['fpr']):
+
+    subgroups = np.array(subgroups)
+    print(subgroups)
+    # In order to calculate the convex hull above the diagonal we need to filter to only points above the diagonal (TPR > FPR)
+    ch_eligible = subgroups[subgroups[:, 1] > subgroups[:, 0]]
+    print(ch_eligible)
+
+    # Add anchor points (0, 0) and (1, 1) to the set
+    hull_points = np.vstack([[0, 0], ch_eligible, [1, 1]])
+    print(hull_points)
+
+    # Compute convex hull
+    hull = ConvexHull(hull_points)
+    hull_points_indices = hull.vertices
+    print(hull_points_indices)
+    points_on_hull = hull_points[hull_points_indices]
+    print(points_on_hull)
+
+    # Plot
+    plt.figure(figsize=(8, 6))
+    plt.plot(subgroups[:, 0], subgroups[:, 1], 'bo', label='All points')
+    plt.plot(ch_eligible[:, 0], ch_eligible[:, 1], 'go', label='Points above diagonal')
+    plt.plot([0, 1], [0, 1], 'k--', label='Diagonal (y = x)')
+    plt.fill(hull_points[hull.vertices, 0], hull_points[hull.vertices, 1], 'r', alpha=0.2, label='Convex hull')
+    plt.plot(hull_points[hull.vertices, 0], hull_points[hull.vertices, 1], 'r-', lw=2)
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    plt.title('Convex Hull of Points Above Diagonal')
+    plt.legend()
+    plt.grid(True)
+    plt.xlim(0,1)
+    plt.ylim(0,1)
+    plt.show()
+    plt.close()                    
+    print(candidates)
     return candidates
 
-def true_roc_search(data, target_col, alphas, max_depth=3, min_coverage=50):
+def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50):
     """
     Implement true ROC search with adaptive width calculation.
     
     Args:
         data: DataFrame with the data
         target_col: Name of target column
-        alphas: List of alpha values to test
+        alphas: List of alpha values to test (None for pure ROC search)
         max_depth: Maximum search depth
         min_coverage: Minimum coverage for subgroups
     
     Returns:
-        Dictionary with results for each alpha
+        Dictionary with results for each alpha (or single result for pure ROC)
     """
     results = {}
     
-    for alpha in alphas:
-        print(f"\n=== True ROC Search with α = {alpha} ===")
+    # If no alphas provided, run pure ROC search
+    if alphas is None:
+        alphas = [None]
+        search_modes = ["Pure ROC"]
+    else:
+        search_modes = [f"α = {alpha}" for alpha in alphas]
+    
+    for alpha, mode_name in zip(alphas, search_modes):
+        print(f"\n=== True ROC Search: {mode_name} ===")
         start_time = time.time()
         
         # Initialize with population (empty conditions)
@@ -409,8 +521,12 @@ def true_roc_search(data, target_col, alphas, max_depth=3, min_coverage=50):
         # Best quality subgroup
         best_sg = max(final_subgroups, key=lambda x: x['roc_quality'])
         
-        results[alpha] = {
+        # Use 'pure_roc' as key for alpha-free search
+        result_key = 'pure_roc' if alpha is None else alpha
+        
+        results[result_key] = {
             'alpha': alpha,
+            'mode': mode_name,
             'adaptive_width': adaptive_width,
             'total_candidates': candidates_explored,
             'final_subgroups': len(final_subgroups),
@@ -424,7 +540,7 @@ def true_roc_search(data, target_col, alphas, max_depth=3, min_coverage=50):
             'subgroups': final_subgroups
         }
         
-        print(f"Completed α = {alpha}:")
+        print(f"Completed {mode_name}:")
         print(f"  Adaptive width: {adaptive_width}")
         print(f"  Total candidates: {candidates_explored}")
         print(f"  AUC approximation: {auc:.3f}")
@@ -600,19 +716,29 @@ def create_comparison_plot(results, output_path):
 def main():
     parser = argparse.ArgumentParser(description='True ROC Search with Adaptive Width')
     parser.add_argument('--data', default='./tests/adult.txt', help='Path to data file')
-    parser.add_argument('--target', default='class', help='Target column name')
-    parser.add_argument('--alphas', nargs='+', type=float, default=[0.3, 0.5, 0.7], 
-                       help='Alpha values to test')
+    parser.add_argument('--target', default='target', help='Target column name')
+    parser.add_argument('--alphas', nargs='+', type=float, default=None,
+                       help='Alpha values to test (omit for pure ROC search)')
+    parser.add_argument('--pure-roc', action='store_true', 
+                       help='Run pure ROC search without alpha parameter')
     parser.add_argument('--depth', type=int, default=3, help='Maximum search depth')
     parser.add_argument('--min-coverage', type=int, default=50, help='Minimum subgroup coverage')
     parser.add_argument('--output', default='./runs/true_roc', help='Output directory')
     
     args = parser.parse_args()
     
+    # Determine search mode
+    if args.pure_roc or args.alphas is None:
+        alphas = None
+        search_mode = "Pure ROC Search (no alpha)"
+    else:
+        alphas = args.alphas
+        search_mode = f"Alpha-ROC Search (alphas: {alphas})"
+    
     print("=== True ROC Search Implementation ===")
     print(f"Data: {args.data}")
     print(f"Target: {args.target}")
-    print(f"Alphas: {args.alphas}")
+    print(f"Search mode: {search_mode}")
     print(f"Max depth: {args.depth}")
     print(f"Min coverage: {args.min_coverage}")
     print(f"Output: {args.output}")
@@ -623,22 +749,24 @@ def main():
         return
     
     # Run true ROC search
-    results = true_roc_search(data, args.target, args.alphas, args.depth, args.min_coverage)
+    results = true_roc_search(data, args.target, alphas, args.depth, args.min_coverage)
     
     if results:
         # Save results
         save_results(results, args.output)
         
-        # Create comparison plot
-        comparison_path = Path(args.output) / 'true_roc_comparison.png'
-        create_comparison_plot(results, comparison_path)
-        print(f"Saved comparison plot: {comparison_path}")
+        # Create comparison plot (only if multiple results)
+        if len(results) > 1:
+            comparison_path = Path(args.output) / 'true_roc_comparison.png'
+            create_comparison_plot(results, comparison_path)
+            print(f"Saved comparison plot: {comparison_path}")
         
         # Print summary
         print("\n=== True ROC Search Summary ===")
-        for alpha in sorted(results.keys()):
-            r = results[alpha]
-            print(f"α = {alpha}: width = {r['adaptive_width']}, "
+        for key in results.keys():
+            r = results[key]
+            mode_str = r['mode']
+            print(f"{mode_str}: width = {r['adaptive_width']}, "
                   f"AUC = {r['auc_approx']:.3f}, "
                   f"quality = {r['best_quality']:.3f}")
 
