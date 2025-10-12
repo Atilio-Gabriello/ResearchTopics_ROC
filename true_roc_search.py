@@ -467,20 +467,47 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
             print(f"Could not calculate population statistics")
             continue
         
+        # Calculate ROC quality for population
+        population_stats['roc_quality'] = roc_quality_measure(population_stats['tpr'], population_stats['fpr'], alpha)
+        
         current_subgroups = [population_stats]
         all_subgroups = [population_stats]
         
         candidates_explored = 0
+        depth_analysis = []  # Track statistics for each depth
+        
+        # Add depth 0 (population) to analysis
+        depth_analysis.append({
+            'depth': 0,
+            'subgroups_start': 1,
+            'candidates_generated': 0,
+            'subgroups_after_pruning': 1,
+            'best_quality': population_stats['roc_quality'],
+            'avg_coverage': population_stats['coverage'],
+            'cumulative_candidates': 0
+        })
         
         for depth in range(1, max_depth + 1):
             print(f"Depth {depth}: Starting with {len(current_subgroups)} subgroups")
+            depth_start_subgroups = len(current_subgroups)
             
             # Generate candidates
             candidates = generate_candidates(data, target_col, current_subgroups, depth, min_coverage)
             candidates_explored += len(candidates)
+            depth_candidates = len(candidates)
             
             if not candidates:
                 print(f"No valid candidates at depth {depth}")
+                # Still record this depth with no progress
+                depth_analysis.append({
+                    'depth': depth,
+                    'subgroups_start': depth_start_subgroups,
+                    'candidates_generated': 0,
+                    'subgroups_after_pruning': depth_start_subgroups,
+                    'best_quality': max([sg.get('roc_quality', 0) for sg in current_subgroups]) if current_subgroups else 0,
+                    'avg_coverage': np.mean([sg['coverage'] for sg in current_subgroups]) if current_subgroups else 0,
+                    'cumulative_candidates': candidates_explored
+                })
                 break
             
             print(f"Generated {len(candidates)} candidates")
@@ -493,6 +520,24 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
             
             # Keep track of all subgroups found
             all_subgroups.extend(candidates)
+            
+            # Record depth statistics
+            if current_subgroups:
+                best_quality = max([sg.get('roc_quality', 0) for sg in current_subgroups])
+                avg_coverage = np.mean([sg['coverage'] for sg in current_subgroups])
+            else:
+                best_quality = 0
+                avg_coverage = 0
+            
+            depth_analysis.append({
+                'depth': depth,
+                'subgroups_start': depth_start_subgroups,
+                'candidates_generated': depth_candidates,
+                'subgroups_after_pruning': len(current_subgroups),
+                'best_quality': best_quality,
+                'avg_coverage': avg_coverage,
+                'cumulative_candidates': candidates_explored
+            })
             
             if not current_subgroups:
                 print(f"No subgroups survived pruning at depth {depth}")
@@ -537,7 +582,8 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
             'best_fpr': best_sg['fpr'],
             'best_precision': best_sg['precision'],
             'best_coverage': best_sg['coverage'],
-            'subgroups': final_subgroups
+            'subgroups': final_subgroups,
+            'depth_analysis': depth_analysis
         }
         
         print(f"Completed {mode_name}:")
@@ -548,6 +594,114 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
         print(f"  Search time: {elapsed_time:.2f}s")
     
     return results
+
+def create_depth_analysis_table(results, output_dir):
+    """Create and save depth-by-depth analysis table."""
+    # Collect all depth data across different alphas
+    all_depth_data = []
+    
+    for alpha, result in results.items():
+        alpha_str = 'Pure ROC' if alpha == 'pure_roc' or alpha is None else f'α = {alpha}'
+        
+        for depth_info in result['depth_analysis']:
+            depth_info_copy = depth_info.copy()
+            depth_info_copy['algorithm'] = alpha_str
+            depth_info_copy['alpha_value'] = alpha
+            # Add AUC and width from final results
+            depth_info_copy['final_auc'] = result['auc_approx']
+            depth_info_copy['final_width'] = result['adaptive_width']
+            all_depth_data.append(depth_info_copy)
+    
+    # Create DataFrame
+    depth_df = pd.DataFrame(all_depth_data)
+    
+    # Reorder columns for better readability
+    column_order = [
+        'algorithm', 'alpha_value', 'depth', 'subgroups_start', 
+        'candidates_generated', 'subgroups_after_pruning', 
+        'best_quality', 'avg_coverage', 'cumulative_candidates',
+        'final_auc', 'final_width'
+    ]
+    depth_df = depth_df[column_order]
+    
+    # Save detailed depth analysis
+    depth_path = output_dir / 'depth_analysis.csv'
+    depth_df.to_csv(depth_path, index=False)
+    print(f"Saved depth analysis to: {depth_path}")
+    
+    # Create summary table by depth (for display)
+    print("\n=== Depth-by-Depth Analysis ===")
+    
+    # Create a pivot-style display
+    unique_alphas = depth_df['algorithm'].unique()
+    max_depth = depth_df['depth'].max()
+    
+    # Print header
+    print(f"{'Depth':<6}", end='')
+    for alpha in unique_alphas:
+        print(f"{alpha:<25}", end='')
+    print()
+    
+    print("-" * (6 + 25 * len(unique_alphas)))
+    
+    # Print each depth's statistics
+    for depth in range(int(max_depth) + 1):
+        depth_data = depth_df[depth_df['depth'] == depth]
+        
+        # Subgroups after pruning and candidates
+        print(f"{depth:<6}", end='')
+        for alpha in unique_alphas:
+            alpha_data = depth_data[depth_data['algorithm'] == alpha]
+            if not alpha_data.empty:
+                subgroups = alpha_data.iloc[0]['subgroups_after_pruning']
+                candidates = alpha_data.iloc[0]['candidates_generated']
+                print(f"S:{subgroups:>3} C:{candidates:>4}        ", end='')
+            else:
+                print(f"{'N/A':<25}", end='')
+        print()
+    
+    print("\nLegend: S = Subgroups after pruning, C = Candidates generated")
+    
+    # Print final AUC and width summary
+    print("\n=== Final Results Summary ===")
+    print(f"{'Algorithm':<15} {'AUC':<8} {'Width':<8}")
+    print("-" * 35)
+    for alpha in unique_alphas:
+        alpha_data = depth_df[depth_df['algorithm'] == alpha].iloc[0]
+        auc = alpha_data['final_auc']
+        width = alpha_data['final_width']
+        print(f"{alpha:<15} {auc:<8.3f} {width:<8}")
+    
+    # Create a more detailed comparison table
+    comparison_data = []
+    for depth in range(int(max_depth) + 1):
+        depth_data = depth_df[depth_df['depth'] == depth]
+        
+        row = {'depth': depth}
+        for alpha in unique_alphas:
+            alpha_data = depth_data[depth_data['algorithm'] == alpha]
+            if not alpha_data.empty:
+                info = alpha_data.iloc[0]
+                row[f'{alpha}_subgroups'] = info['subgroups_after_pruning']
+                row[f'{alpha}_candidates'] = info['candidates_generated']
+                row[f'{alpha}_quality'] = round(info['best_quality'], 3)
+                row[f'{alpha}_coverage'] = round(info['avg_coverage'], 1)
+                row[f'{alpha}_auc'] = round(info['final_auc'], 3)
+                row[f'{alpha}_width'] = info['final_width']
+            else:
+                row[f'{alpha}_subgroups'] = 0
+                row[f'{alpha}_candidates'] = 0
+                row[f'{alpha}_quality'] = 0
+                row[f'{alpha}_coverage'] = 0
+                row[f'{alpha}_auc'] = 0
+                row[f'{alpha}_width'] = 0
+        
+        comparison_data.append(row)
+    
+    comparison_df = pd.DataFrame(comparison_data)
+    comparison_path = output_dir / 'depth_comparison.csv'
+    comparison_df.to_csv(comparison_path, index=False)
+    print(f"Saved depth comparison to: {comparison_path}")
 
 def save_results(results, output_dir):
     """Save results to files."""
@@ -573,6 +727,9 @@ def save_results(results, output_dir):
     summary_path = output_dir / 'true_roc_comparison.csv'
     summary_df.to_csv(summary_path, index=False)
     print(f"Saved summary to: {summary_path}")
+    
+    # Create and save depth analysis table
+    create_depth_analysis_table(results, output_dir)
     
     # Save detailed results for each alpha
     for alpha, result in results.items():
