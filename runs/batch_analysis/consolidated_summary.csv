@@ -1,0 +1,4 @@
+dataset,algorithm,alpha,adaptive_width,auc_approx,best_quality,total_candidates,search_time,target_column,data_size
+adult,Pure ROC,,20,0.77685546875,0.569055316091954,3185,9.895589828491211,target,1000
+agaricus-lepiota,Pure ROC,,20,0.15857095973620944,0.9373497438606168,7336,28.353954315185547,poisonous,8124
+ionosphere,Pure ROC,,8,0.742310405643739,0.5419047619047619,6606,17.895878314971924,Attribute35,351

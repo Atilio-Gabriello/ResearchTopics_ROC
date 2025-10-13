@@ -22,6 +22,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from scipy.spatial import ConvexHull, KDTree
 import time
+import glob
 
 def load_data(filepath):
     """Load data from file, handling different formats."""
@@ -870,6 +871,196 @@ def create_comparison_plot(results, output_path):
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
 
+def get_dataset_info():
+    """Define dataset information with target columns."""
+    return {
+        'adult.txt': 'target',
+        'agaricus-lepiota.txt': 'poisonous',
+        'ionosphere.txt': 'Attribute35'
+    }
+
+def run_batch_analysis(data_dir, alphas=None, depth=3, min_coverage=50, output_dir='./runs/batch_analysis'):
+    """
+    Run ROC search on multiple datasets and consolidate results.
+    
+    Args:
+        data_dir: Directory containing dataset files
+        alphas: List of alpha values (None for pure ROC)
+        depth: Maximum search depth
+        min_coverage: Minimum subgroup coverage
+        output_dir: Output directory for consolidated results
+    
+    Returns:
+        Dictionary containing consolidated results
+    """
+    dataset_info = get_dataset_info()
+    consolidated_results = {}
+    all_depth_analysis = []
+    all_summaries = []
+    
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+    
+    print("=== Batch ROC Analysis ===")
+    print(f"Processing datasets from: {data_dir}")
+    print(f"Output directory: {output_dir}")
+    
+    # Process each dataset
+    for filename, target_col in dataset_info.items():
+        data_path = Path(data_dir) / filename
+        
+        if not data_path.exists():
+            print(f"Dataset not found: {data_path}")
+            continue
+            
+        print(f"\n=== Processing {filename} ===")
+        print(f"Target column: {target_col}")
+        
+        # Load data
+        data = load_data(str(data_path))
+        if data is None:
+            print(f"Failed to load {filename}")
+            continue
+            
+        # Run ROC search
+        dataset_results = true_roc_search(data, target_col, alphas, depth, min_coverage)
+        
+        if not dataset_results:
+            print(f"No results for {dataset_name}")
+            continue
+            
+        # Add dataset name to results
+        dataset_name = filename.replace('.txt', '')
+        for key in dataset_results:
+            dataset_results[key]['dataset'] = dataset_name
+            
+        consolidated_results[dataset_name] = dataset_results
+        
+        # Save individual dataset results
+        dataset_output_dir = Path(output_dir) / dataset_name
+        save_results(dataset_results, str(dataset_output_dir))
+        
+        # Collect depth analysis and summaries for consolidated tables
+        depth_file = dataset_output_dir / 'depth_analysis.csv'
+        if depth_file.exists():
+            depth_df = pd.read_csv(depth_file)
+            depth_df['dataset'] = dataset_name
+            all_depth_analysis.append(depth_df)
+            
+        # Extract summary info
+        for algorithm_key, result in dataset_results.items():
+            summary_row = {
+                'dataset': dataset_name,
+                'algorithm': result['mode'],
+                'alpha': result.get('alpha', 'pure_roc'),
+                'adaptive_width': result['adaptive_width'],
+                'auc_approx': result['auc_approx'],
+                'best_quality': result['best_quality'],
+                'total_candidates': result['total_candidates'],
+                'search_time': result['search_time'],
+                'target_column': target_col,
+                'data_size': len(data)
+            }
+            all_summaries.append(summary_row)
+    
+    # Create consolidated tables
+    if all_depth_analysis:
+        consolidated_depth_df = pd.concat(all_depth_analysis, ignore_index=True)
+        consolidated_depth_path = Path(output_dir) / 'consolidated_depth_analysis.csv'
+        consolidated_depth_df.to_csv(consolidated_depth_path, index=False)
+        print(f"\nSaved consolidated depth analysis: {consolidated_depth_path}")
+    
+    if all_summaries:
+        consolidated_summary_df = pd.DataFrame(all_summaries)
+        consolidated_summary_path = Path(output_dir) / 'consolidated_summary.csv'
+        consolidated_summary_df.to_csv(consolidated_summary_path, index=False)
+        print(f"Saved consolidated summary: {consolidated_summary_path}")
+        
+        # Create consolidated visualization
+        create_consolidated_plots(consolidated_summary_df, output_dir)
+    
+    return consolidated_results
+
+def create_consolidated_plots(summary_df, output_dir):
+    """Create consolidated visualization plots."""
+    
+    # 1. AUC comparison across datasets
+    plt.figure(figsize=(12, 8))
+    
+    datasets = summary_df['dataset'].unique()
+    algorithms = summary_df['algorithm'].unique()
+    
+    x = np.arange(len(datasets))
+    width = 0.8 / len(algorithms)
+    
+    for i, algorithm in enumerate(algorithms):
+        alg_data = summary_df[summary_df['algorithm'] == algorithm]
+        aucs = []
+        for dataset in datasets:
+            dataset_auc = alg_data[alg_data['dataset'] == dataset]['auc_approx']
+            aucs.append(dataset_auc.iloc[0] if len(dataset_auc) > 0 else 0)
+        
+        plt.bar(x + i * width, aucs, width, label=algorithm, alpha=0.8)
+    
+    plt.xlabel('Dataset')
+    plt.ylabel('AUC Score')
+    plt.title('AUC Comparison Across Datasets and Algorithms')
+    plt.xticks(x + width * (len(algorithms) - 1) / 2, datasets, rotation=45)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    auc_plot_path = Path(output_dir) / 'consolidated_auc_comparison.png'
+    plt.savefig(auc_plot_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved AUC comparison plot: {auc_plot_path}")
+    
+    # 2. Quality vs Width scatter plot
+    plt.figure(figsize=(10, 8))
+    
+    for algorithm in algorithms:
+        alg_data = summary_df[summary_df['algorithm'] == algorithm]
+        plt.scatter(alg_data['adaptive_width'], alg_data['best_quality'], 
+                   label=algorithm, alpha=0.7, s=100)
+        
+        # Add dataset labels
+        for _, row in alg_data.iterrows():
+            plt.annotate(row['dataset'], 
+                        (row['adaptive_width'], row['best_quality']),
+                        xytext=(5, 5), textcoords='offset points', fontsize=8)
+    
+    plt.xlabel('Adaptive Width')
+    plt.ylabel('Best Quality')
+    plt.title('Quality vs Width Across Datasets')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    quality_plot_path = Path(output_dir) / 'consolidated_quality_width.png'
+    plt.savefig(quality_plot_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved quality vs width plot: {quality_plot_path}")
+    
+    # 3. Performance summary table
+    create_performance_summary_table(summary_df, output_dir)
+
+def create_performance_summary_table(summary_df, output_dir):
+    """Create a formatted performance summary table."""
+    
+    print("\n=== Consolidated Performance Summary ===")
+    print("Dataset".ljust(15) + "Algorithm".ljust(20) + "AUC".ljust(8) + "Width".ljust(8) + "Quality".ljust(10) + "Time(s)".ljust(10))
+    print("=" * 80)
+    
+    for _, row in summary_df.iterrows():
+        dataset = str(row['dataset']).ljust(15)
+        algorithm = str(row['algorithm']).ljust(20)
+        auc = f"{row['auc_approx']:.3f}".ljust(8)
+        width = str(int(row['adaptive_width'])).ljust(8)
+        quality = f"{row['best_quality']:.3f}".ljust(10)
+        time_str = f"{row['search_time']:.2f}".ljust(10)
+        
+        print(f"{dataset}{algorithm}{auc}{width}{quality}{time_str}")
+
 def main():
     parser = argparse.ArgumentParser(description='True ROC Search with Adaptive Width')
     parser.add_argument('--data', default='./tests/adult.txt', help='Path to data file')
@@ -881,6 +1072,10 @@ def main():
     parser.add_argument('--depth', type=int, default=3, help='Maximum search depth')
     parser.add_argument('--min-coverage', type=int, default=50, help='Minimum subgroup coverage')
     parser.add_argument('--output', default='./runs/true_roc', help='Output directory')
+    parser.add_argument('--batch', action='store_true', 
+                       help='Run batch analysis on all datasets in tests directory')
+    parser.add_argument('--data-dir', default='./tests', 
+                       help='Directory containing datasets (for batch mode)')
     
     args = parser.parse_args()
     
@@ -892,40 +1087,63 @@ def main():
         alphas = args.alphas
         search_mode = f"Alpha-ROC Search (alphas: {alphas})"
     
-    print("=== True ROC Search Implementation ===")
-    print(f"Data: {args.data}")
-    print(f"Target: {args.target}")
-    print(f"Search mode: {search_mode}")
-    print(f"Max depth: {args.depth}")
-    print(f"Min coverage: {args.min_coverage}")
-    print(f"Output: {args.output}")
-    
-    # Load data
-    data = load_data(args.data)
-    if data is None:
-        return
-    
-    # Run true ROC search
-    results = true_roc_search(data, args.target, alphas, args.depth, args.min_coverage)
-    
-    if results:
-        # Save results
-        save_results(results, args.output)
+    if args.batch:
+        # Run batch analysis
+        print("=== Batch ROC Analysis ===")
+        print(f"Data directory: {args.data_dir}")
+        print(f"Search mode: {search_mode}")
+        print(f"Max depth: {args.depth}")
+        print(f"Min coverage: {args.min_coverage}")
+        print(f"Output: {args.output}")
         
-        # Create comparison plot (only if multiple results)
-        if len(results) > 1:
-            comparison_path = Path(args.output) / 'true_roc_comparison.png'
-            create_comparison_plot(results, comparison_path)
-            print(f"Saved comparison plot: {comparison_path}")
+        results = run_batch_analysis(
+            args.data_dir, 
+            alphas, 
+            args.depth, 
+            args.min_coverage, 
+            args.output
+        )
         
-        # Print summary
-        print("\n=== True ROC Search Summary ===")
-        for key in results.keys():
-            r = results[key]
-            mode_str = r['mode']
-            print(f"{mode_str}: width = {r['adaptive_width']}, "
-                  f"AUC = {r['auc_approx']:.3f}, "
-                  f"quality = {r['best_quality']:.3f}")
+        if results:
+            print(f"\n=== Batch Analysis Complete ===")
+            print(f"Processed {len(results)} datasets")
+            print(f"Results saved to: {args.output}")
+    else:
+        # Run single dataset analysis
+        print("=== True ROC Search Implementation ===")
+        print(f"Data: {args.data}")
+        print(f"Target: {args.target}")
+        print(f"Search mode: {search_mode}")
+        print(f"Max depth: {args.depth}")
+        print(f"Min coverage: {args.min_coverage}")
+        print(f"Output: {args.output}")
+        
+        # Load data
+        data = load_data(args.data)
+        if data is None:
+            return
+        
+        # Run true ROC search
+        results = true_roc_search(data, args.target, alphas, args.depth, args.min_coverage)
+        
+        if results:
+            # Save results
+            save_results(results, args.output)
+            
+            # Create comparison plot (only if multiple results)
+            if len(results) > 1:
+                comparison_path = Path(args.output) / 'true_roc_comparison.png'
+                create_comparison_plot(results, comparison_path)
+                print(f"Saved comparison plot: {comparison_path}")
+            
+            # Print summary
+            print("\n=== True ROC Search Summary ===")
+            for key in results.keys():
+                r = results[key]
+                mode_str = r['mode']
+                print(f"{mode_str}: width = {r['adaptive_width']}, "
+                      f"AUC = {r['auc_approx']:.3f}, "
+                      f"quality = {r['best_quality']:.3f}")
 
 if __name__ == '__main__':
     main()
