@@ -1,0 +1,6 @@
+depth,Pure ROC_subgroups,Pure ROC_candidates,Pure ROC_quality,Pure ROC_coverage,Pure ROC_auc,Pure ROC_width
+0,1,0,0.0,958.0,0.201,6
+1,9,108,0.342,372.8,0.201,6
+2,6,864,0.342,289.8,0.201,6
+3,6,478,0.342,287.0,0.201,6
+4,5,455,0.342,307.2,0.201,6

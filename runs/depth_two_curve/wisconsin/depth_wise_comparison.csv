@@ -1,0 +1,5 @@
+depth,first_curve,second_curve,instances_removed,percent_covered
+0,"{'data_size': 699, 'subgroups': 1, 'candidates': 0, 'best_quality': np.float64(0.0), 'auc': 0}","{'data_size': 699, 'subgroups': 0, 'candidates': 0, 'best_quality': 0, 'auc': 0}",0,0.0
+1,"{'data_size': 699, 'subgroups': 11, 'candidates': 107, 'best_quality': np.float64(0.8130968127706608), 'auc': np.float64(0.9550770986972041)}","{'data_size': 0, 'subgroups': 0, 'candidates': 0, 'best_quality': 0, 'auc': 0}",699,100.0
+2,"{'data_size': 699, 'subgroups': 9, 'candidates': 952, 'best_quality': np.float64(0.8716048487923318), 'auc': np.float64(0.9711129029335557)}","{'data_size': 329, 'subgroups': 1, 'candidates': 502, 'best_quality': np.float64(0.9420731707317073), 'auc': 0}",370,52.93276108726752
+3,"{'data_size': 699, 'subgroups': 10, 'candidates': 679, 'best_quality': np.float64(0.8868886915870916), 'auc': np.float64(0.977006287484825)}","{'data_size': 353, 'subgroups': 1, 'candidates': 176, 'best_quality': np.float64(0.9487179487179487), 'auc': 0}",346,49.49928469241774

@@ -1,0 +1,3 @@
+data_size,num_subgroups,adaptive_width,auc,best_quality,total_candidates,search_time,curve
+351,10,10,0.7409171075837744,0.5419047619047619,5406,11.518087148666382,first_curve
+2,0,0,0.0,0.0,0,0.0,second_curve

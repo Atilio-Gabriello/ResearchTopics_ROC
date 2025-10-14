@@ -198,6 +198,340 @@ def is_on_roc_hull(points):
         # If hull calculation fails, keep all points
         return [True] * len(points)
 
+def calculate_roc_metrics(points):
+    """
+    Calculate ROC metrics for a set of points.
+    
+    Args:
+        points: Array of (fpr, tpr) points, shape (n, 2)
+    
+    Returns:
+        Dictionary with AUC, number of points, best TPR, best FPR, etc.
+    """
+    if len(points) == 0:
+        return {
+            'auc': 0.0,
+            'num_points': 0,
+            'best_tpr': 0.0,
+            'best_fpr': 0.0,
+            'avg_tpr': 0.0,
+            'avg_fpr': 0.0,
+            'max_quality': 0.0
+        }
+    
+    points_array = np.array(points)
+    
+    # Calculate AUC using trapezoidal rule
+    # Sort by FPR
+    sorted_indices = np.argsort(points_array[:, 0])
+    sorted_points = points_array[sorted_indices]
+    
+    # Add (0, 0) and (1, 1) for complete ROC curve
+    roc_curve = np.vstack([[0, 0], sorted_points, [1, 1]])
+    
+    # Calculate AUC using trapezoidal rule
+    auc = 0.0
+    for i in range(len(roc_curve) - 1):
+        x1, y1 = roc_curve[i]
+        x2, y2 = roc_curve[i + 1]
+        # Trapezoidal area
+        auc += (x2 - x1) * (y1 + y2) / 2
+    
+    # Calculate best point (highest TPR - FPR, or ROC quality)
+    qualities = points_array[:, 1] - points_array[:, 0]  # TPR - FPR
+    best_idx = np.argmax(qualities)
+    
+    return {
+        'auc': auc,
+        'num_points': len(points),
+        'best_tpr': points_array[best_idx, 1],
+        'best_fpr': points_array[best_idx, 0],
+        'avg_tpr': np.mean(points_array[:, 1]),
+        'avg_fpr': np.mean(points_array[:, 0]),
+        'max_quality': qualities[best_idx],
+        'avg_quality': np.mean(qualities)
+    }
+
+def remove_hull_points_and_recalculate(points, return_details=False):
+    """
+    Remove points on the original convex hull and recalculate the hull with remaining points.
+    
+    Args:
+        points: Array of (fpr, tpr) points, shape (n, 2)
+        return_details: If True, return detailed comparison information
+    
+    Returns:
+        If return_details=False: Array of new hull points
+        If return_details=True: Dictionary with original hull, new hull, removed points, and ROC metrics
+    """
+    if len(points) < 3:
+        if return_details:
+            return {
+                'original_hull': points,
+                'new_hull': np.array([]),
+                'removed_points': points,
+                'remaining_points': np.array([]),
+                'original_hull_area': 0,
+                'new_hull_area': 0
+            }
+        return np.array([])
+    
+    points_array = np.array(points)
+    
+    # Filter to only points above diagonal (TPR > FPR)
+    above_diagonal = points_array[points_array[:, 1] > points_array[:, 0]]
+    
+    if len(above_diagonal) < 3:
+        if return_details:
+            return {
+                'original_hull': above_diagonal,
+                'new_hull': np.array([]),
+                'removed_points': above_diagonal,
+                'remaining_points': np.array([]),
+                'original_hull_area': 0,
+                'new_hull_area': 0
+            }
+        return np.array([])
+    
+    # Add anchor points (0, 0) and (1, 1)
+    extended_points = np.vstack([[0, 0], above_diagonal, [1, 1]])
+    
+    try:
+        # Compute original convex hull
+        original_hull = ConvexHull(extended_points)
+        original_hull_indices = set(original_hull.vertices)
+        
+        # Get original hull points (excluding anchors)
+        original_hull_points_indices = [i - 1 for i in original_hull_indices 
+                                       if 1 <= i <= len(above_diagonal)]
+        original_hull_points = above_diagonal[original_hull_points_indices]
+        
+        # Calculate original hull area
+        original_hull_area = original_hull.volume
+        
+        # Remove hull points from the set
+        remaining_indices = [i for i in range(len(above_diagonal)) 
+                           if i not in original_hull_points_indices]
+        remaining_points = above_diagonal[remaining_indices]
+        
+        if len(remaining_points) < 3:
+            # Not enough points to form a new hull
+            if return_details:
+                return {
+                    'original_hull': original_hull_points,
+                    'new_hull': np.array([]),
+                    'removed_points': original_hull_points,
+                    'remaining_points': remaining_points,
+                    'original_hull_area': original_hull_area,
+                    'new_hull_area': 0,
+                    'hull_area_reduction': original_hull_area
+                }
+            return np.array([])
+        
+        # Recalculate hull with remaining points
+        new_extended_points = np.vstack([[0, 0], remaining_points, [1, 1]])
+        new_hull = ConvexHull(new_extended_points)
+        new_hull_indices = set(new_hull.vertices)
+        
+        # Get new hull points (excluding anchors)
+        new_hull_points_indices = [i - 1 for i in new_hull_indices 
+                                  if 1 <= i <= len(remaining_points)]
+        new_hull_points = remaining_points[new_hull_points_indices]
+        
+        # Calculate new hull area
+        new_hull_area = new_hull.volume
+        
+        if return_details:
+            # Calculate ROC metrics for original hull
+            original_metrics = calculate_roc_metrics(original_hull_points)
+            
+            # Calculate ROC metrics for new hull
+            new_metrics = calculate_roc_metrics(new_hull_points)
+            
+            # Calculate metrics for all points (for reference)
+            all_metrics = calculate_roc_metrics(above_diagonal)
+            
+            return {
+                'original_hull': original_hull_points,
+                'new_hull': new_hull_points,
+                'removed_points': original_hull_points,
+                'remaining_points': remaining_points,
+                'all_points': above_diagonal,
+                'original_hull_area': original_hull_area,
+                'new_hull_area': new_hull_area,
+                'hull_area_reduction': original_hull_area - new_hull_area,
+                'reduction_percentage': ((original_hull_area - new_hull_area) / original_hull_area * 100) 
+                                       if original_hull_area > 0 else 0,
+                # Original hull metrics
+                'original_auc': original_metrics['auc'],
+                'original_num_subgroups': original_metrics['num_points'],
+                'original_best_tpr': original_metrics['best_tpr'],
+                'original_best_fpr': original_metrics['best_fpr'],
+                'original_avg_quality': original_metrics['avg_quality'],
+                'original_max_quality': original_metrics['max_quality'],
+                # New hull metrics
+                'new_auc': new_metrics['auc'],
+                'new_num_subgroups': new_metrics['num_points'],
+                'new_best_tpr': new_metrics['best_tpr'],
+                'new_best_fpr': new_metrics['best_fpr'],
+                'new_avg_quality': new_metrics['avg_quality'],
+                'new_max_quality': new_metrics['max_quality'],
+                # All points metrics (for reference)
+                'all_points_auc': all_metrics['auc'],
+                'all_points_num': all_metrics['num_points'],
+                'all_points_max_quality': all_metrics['max_quality'],
+                # Comparison metrics
+                'auc_reduction': original_metrics['auc'] - new_metrics['auc'],
+                'auc_reduction_percentage': ((original_metrics['auc'] - new_metrics['auc']) / original_metrics['auc'] * 100)
+                                           if original_metrics['auc'] > 0 else 0,
+                'subgroups_removed': original_metrics['num_points'],
+                'subgroups_remaining': len(remaining_points),
+                'quality_reduction': original_metrics['max_quality'] - new_metrics['max_quality']
+            }
+        
+        return new_hull_points
+        
+    except Exception as e:
+        print(f"Error in hull recalculation: {e}")
+        if return_details:
+            return {
+                'original_hull': np.array([]),
+                'new_hull': np.array([]),
+                'removed_points': np.array([]),
+                'remaining_points': points_array,
+                'original_hull_area': 0,
+                'new_hull_area': 0,
+                'error': str(e)
+            }
+        return np.array([])
+
+def plot_hull_comparison(hull_data, depth, output_path=None, title_suffix=""):
+    """
+    Create a visualization comparing original hull with recalculated hull after removing original hull points.
+    
+    Args:
+        hull_data: Dictionary from remove_hull_points_and_recalculate with return_details=True
+        depth: Search depth for labeling
+        output_path: Path to save the plot (optional)
+        title_suffix: Additional text for the title
+    """
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
+    
+    # Extract data
+    all_points = hull_data['all_points']
+    original_hull = hull_data['original_hull']
+    new_hull = hull_data.get('new_hull', np.array([]))
+    remaining_points = hull_data['remaining_points']
+    
+    # Plot 1: Original hull
+    ax1.plot(all_points[:, 0], all_points[:, 1], 'bo', alpha=0.5, label='All points', markersize=6)
+    if len(original_hull) > 0:
+        # Sort hull points for proper polygon drawing
+        hull_sorted = original_hull[np.argsort(original_hull[:, 0])]
+        ax1.plot(hull_sorted[:, 0], hull_sorted[:, 1], 'r-', linewidth=2, label='Original hull')
+        ax1.scatter(original_hull[:, 0], original_hull[:, 1], c='red', s=100, 
+                   marker='*', zorder=5, label='Hull points', edgecolors='black')
+    ax1.plot([0, 1], [0, 1], 'k--', alpha=0.3, label='Diagonal')
+    ax1.set_xlabel('FPR')
+    ax1.set_ylabel('TPR')
+    ax1.set_title(f'Original Hull (Depth {depth})')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    ax1.set_xlim(0, 1)
+    ax1.set_ylim(0, 1)
+    
+    # Plot 2: Remaining points and new hull
+    ax2.plot(remaining_points[:, 0], remaining_points[:, 1], 'go', alpha=0.5, 
+            label='Remaining points', markersize=6)
+    if len(new_hull) > 0:
+        # Sort hull points for proper polygon drawing
+        new_hull_sorted = new_hull[np.argsort(new_hull[:, 0])]
+        ax2.plot(new_hull_sorted[:, 0], new_hull_sorted[:, 1], 'purple', linewidth=2, 
+                label='New hull')
+        ax2.scatter(new_hull[:, 0], new_hull[:, 1], c='purple', s=100, 
+                   marker='*', zorder=5, label='New hull points', edgecolors='black')
+    ax2.plot([0, 1], [0, 1], 'k--', alpha=0.3, label='Diagonal')
+    ax2.set_xlabel('FPR')
+    ax2.set_ylabel('TPR')
+    ax2.set_title(f'New Hull After Removal (Depth {depth})')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xlim(0, 1)
+    ax2.set_ylim(0, 1)
+    
+    # Plot 3: Comparison overlay
+    ax3.plot(all_points[:, 0], all_points[:, 1], 'bo', alpha=0.3, label='All points', markersize=4)
+    if len(original_hull) > 0:
+        hull_sorted = original_hull[np.argsort(original_hull[:, 0])]
+        ax3.plot(hull_sorted[:, 0], hull_sorted[:, 1], 'r-', linewidth=2, 
+                alpha=0.7, label='Original hull')
+    if len(new_hull) > 0:
+        new_hull_sorted = new_hull[np.argsort(new_hull[:, 0])]
+        ax3.plot(new_hull_sorted[:, 0], new_hull_sorted[:, 1], 'purple', 
+                linewidth=2, linestyle='--', alpha=0.7, label='New hull')
+    ax3.plot([0, 1], [0, 1], 'k--', alpha=0.3, label='Diagonal')
+    ax3.set_xlabel('FPR')
+    ax3.set_ylabel('TPR')
+    
+    # Add statistics to title
+    area_reduction = hull_data.get('hull_area_reduction', 0)
+    reduction_pct = hull_data.get('reduction_percentage', 0)
+    ax3.set_title(f'Hull Comparison (Depth {depth})\n'
+                 f'Area reduction: {area_reduction:.3f} ({reduction_pct:.1f}%)')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    ax3.set_xlim(0, 1)
+    ax3.set_ylim(0, 1)
+    
+    plt.suptitle(f'ROC Convex Hull Comparison{title_suffix}', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    
+    if output_path:
+        # Create directory if it doesn't exist
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        print(f"Saved hull comparison plot to: {output_path}")
+    
+    plt.show()
+    plt.close()
+    
+    # Print detailed statistics
+    print(f"\n=== Hull Comparison Statistics (Depth {depth}) ===")
+    print(f"\n--- Point Counts ---")
+    print(f"Total points: {len(all_points)}")
+    print(f"Original hull points: {len(original_hull)}")
+    print(f"Removed points: {hull_data.get('subgroups_removed', len(original_hull))}")
+    print(f"Remaining points: {len(remaining_points)}")
+    print(f"New hull points: {len(new_hull)}")
+    
+    print(f"\n--- Hull Area Metrics ---")
+    print(f"Original hull area: {hull_data.get('original_hull_area', 0):.4f}")
+    print(f"New hull area: {hull_data.get('new_hull_area', 0):.4f}")
+    print(f"Area reduction: {area_reduction:.4f} ({reduction_pct:.1f}%)")
+    
+    print(f"\n--- AUC Metrics ---")
+    print(f"Original hull AUC: {hull_data.get('original_auc', 0):.4f}")
+    print(f"New hull AUC: {hull_data.get('new_auc', 0):.4f}")
+    print(f"AUC reduction: {hull_data.get('auc_reduction', 0):.4f} ({hull_data.get('auc_reduction_percentage', 0):.1f}%)")
+    print(f"All points AUC: {hull_data.get('all_points_auc', 0):.4f}")
+    
+    print(f"\n--- Quality Metrics ---")
+    print(f"Original best quality (TPR-FPR): {hull_data.get('original_max_quality', 0):.4f}")
+    print(f"Original avg quality: {hull_data.get('original_avg_quality', 0):.4f}")
+    print(f"New best quality (TPR-FPR): {hull_data.get('new_max_quality', 0):.4f}")
+    print(f"New avg quality: {hull_data.get('new_avg_quality', 0):.4f}")
+    print(f"Quality reduction: {hull_data.get('quality_reduction', 0):.4f}")
+    
+    print(f"\n--- Best Subgroup (Original Hull) ---")
+    print(f"Best TPR: {hull_data.get('original_best_tpr', 0):.4f}")
+    print(f"Best FPR: {hull_data.get('original_best_fpr', 0):.4f}")
+    
+    print(f"\n--- Best Subgroup (New Hull) ---")
+    print(f"Best TPR: {hull_data.get('new_best_tpr', 0):.4f}")
+    print(f"Best FPR: {hull_data.get('new_best_fpr', 0):.4f}")
+
+
 def adaptive_roc_pruning(subgroups, alpha=None, quality_threshold=None):
     """
     Implement true ROC search pruning with adaptive width.
@@ -434,8 +768,17 @@ def generate_candidates(data, target_col, current_subgroups, depth, min_coverage
     plt.xlim(0,1)
     plt.ylim(0,1)
     plt.show()
-    plt.close()                    
-    return candidates
+    plt.close()
+    
+    # Store hull information for comparison
+    hull_comparison = {
+        'all_points': subgroups,
+        'original_hull_points': points_on_hull,
+        'original_hull_indices': hull_points_indices,
+        'ch_eligible': ch_eligible
+    }
+    
+    return candidates, hull_comparison
 
 def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50):
     """
@@ -478,6 +821,7 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
         
         candidates_explored = 0
         depth_analysis = []  # Track statistics for each depth
+        hull_comparisons = []  # Track hull comparisons for each depth
         
         # Add depth 0 (population) to analysis
         depth_analysis.append({
@@ -494,10 +838,32 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
             print(f"Depth {depth}: Starting with {len(current_subgroups)} subgroups")
             depth_start_subgroups = len(current_subgroups)
             
-            # Generate candidates
-            candidates = generate_candidates(data, target_col, current_subgroups, depth, min_coverage)
+            # Generate candidates and get hull comparison data
+            candidates, hull_comparison = generate_candidates(data, target_col, current_subgroups, depth, min_coverage)
             candidates_explored += len(candidates)
             depth_candidates = len(candidates)
+            
+            # Perform hull comparison analysis
+            if len(hull_comparison.get('ch_eligible', [])) > 0:
+                hull_data = remove_hull_points_and_recalculate(
+                    hull_comparison['ch_eligible'], 
+                    return_details=True
+                )
+                hull_data['depth'] = depth
+                hull_comparisons.append(hull_data)
+                
+                print(f"Hull comparison at depth {depth}:")
+                print(f"  Original hull points: {len(hull_data['original_hull'])}")
+                print(f"  New hull points: {len(hull_data.get('new_hull', []))}")
+                print(f"  Area reduction: {hull_data.get('hull_area_reduction', 0):.4f}")
+            else:
+                print(f"No hull comparison possible at depth {depth} (insufficient points)")
+                hull_comparisons.append({
+                    'depth': depth,
+                    'original_hull': np.array([]),
+                    'new_hull': np.array([]),
+                    'error': 'Insufficient points above diagonal'
+                })
             
             if not candidates:
                 print(f"No valid candidates at depth {depth}")
@@ -586,7 +952,8 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
             'best_precision': best_sg['precision'],
             'best_coverage': best_sg['coverage'],
             'subgroups': final_subgroups,
-            'depth_analysis': depth_analysis
+            'depth_analysis': depth_analysis,
+            'hull_comparisons': hull_comparisons
         }
         
         print(f"Completed {mode_name}:")
@@ -784,6 +1151,61 @@ def save_results(results, output_dir):
         # Save to CSV
         pd.DataFrame(subgroups_data).to_csv(alpha_dir / 'subgroups.csv', index=False)
         pd.DataFrame(roc_points_data).to_csv(alpha_dir / 'roc_points.csv', index=False)
+        
+        # Save hull comparison data
+        if 'hull_comparisons' in result and result['hull_comparisons']:
+            hull_dir = alpha_dir / 'hull_comparisons'
+            hull_dir.mkdir(exist_ok=True)
+            
+            hull_summary_data = []
+            for hull_data in result['hull_comparisons']:
+                depth = hull_data.get('depth', 'unknown')
+                
+                # Save comprehensive statistics
+                hull_summary_data.append({
+                    'depth': depth,
+                    # Point counts
+                    'total_points': len(hull_data.get('all_points', [])),
+                    'original_hull_points': len(hull_data.get('original_hull', [])),
+                    'new_hull_points': len(hull_data.get('new_hull', [])),
+                    'remaining_points': len(hull_data.get('remaining_points', [])),
+                    'subgroups_removed': hull_data.get('subgroups_removed', 0),
+                    # Hull area metrics
+                    'original_hull_area': hull_data.get('original_hull_area', 0),
+                    'new_hull_area': hull_data.get('new_hull_area', 0),
+                    'hull_area_reduction': hull_data.get('hull_area_reduction', 0),
+                    'area_reduction_percentage': hull_data.get('reduction_percentage', 0),
+                    # AUC metrics
+                    'original_auc': hull_data.get('original_auc', 0),
+                    'new_auc': hull_data.get('new_auc', 0),
+                    'all_points_auc': hull_data.get('all_points_auc', 0),
+                    'auc_reduction': hull_data.get('auc_reduction', 0),
+                    'auc_reduction_percentage': hull_data.get('auc_reduction_percentage', 0),
+                    # Quality metrics
+                    'original_max_quality': hull_data.get('original_max_quality', 0),
+                    'original_avg_quality': hull_data.get('original_avg_quality', 0),
+                    'new_max_quality': hull_data.get('new_max_quality', 0),
+                    'new_avg_quality': hull_data.get('new_avg_quality', 0),
+                    'quality_reduction': hull_data.get('quality_reduction', 0),
+                    # Best subgroup metrics
+                    'original_best_tpr': hull_data.get('original_best_tpr', 0),
+                    'original_best_fpr': hull_data.get('original_best_fpr', 0),
+                    'new_best_tpr': hull_data.get('new_best_tpr', 0),
+                    'new_best_fpr': hull_data.get('new_best_fpr', 0)
+                })
+                
+                # Create visualization for this depth
+                if 'all_points' in hull_data and len(hull_data.get('original_hull', [])) > 0:
+                    plot_path = hull_dir / f'hull_comparison_depth_{depth}.png'
+                    plot_hull_comparison(hull_data, depth, output_path=plot_path, 
+                                       title_suffix=f' (α={alpha})')
+            
+            # Save hull comparison summary
+            if hull_summary_data:
+                hull_summary_df = pd.DataFrame(hull_summary_data)
+                hull_summary_path = hull_dir / 'hull_comparison_summary.csv'
+                hull_summary_df.to_csv(hull_summary_path, index=False)
+                print(f"Saved hull comparison summary to: {hull_summary_path}")
         
         # Create ROC plot
         create_roc_plot(result['subgroups'], alpha, alpha_dir / 'roc_curve.png')
@@ -1073,7 +1495,62 @@ def create_consolidated_plots(summary_df, output_dir):
     # 3. Performance summary table
     create_performance_summary_table(summary_df, output_dir)
 
+def demonstrate_hull_comparison(points, depth=1, output_dir=None):
+    """
+    Standalone demonstration of hull comparison functionality.
+    
+    Args:
+        points: Array of (fpr, tpr) points
+        depth: Depth label for visualization
+        output_dir: Optional output directory for saving plots
+    
+    Returns:
+        Dictionary with hull comparison results
+    """
+    print(f"\n=== Hull Comparison Demonstration (Depth {depth}) ===")
+    
+    # Get detailed hull comparison
+    hull_data = remove_hull_points_and_recalculate(points, return_details=True)
+    hull_data['depth'] = depth
+    
+    # Print statistics
+    print(f"Total points: {len(hull_data.get('all_points', []))}")
+    print(f"Original hull points: {len(hull_data['original_hull'])}")
+    print(f"Points removed: {len(hull_data['removed_points'])}")
+    print(f"Remaining points: {len(hull_data['remaining_points'])}")
+    print(f"New hull points: {len(hull_data.get('new_hull', []))}")
+    print(f"Original hull area: {hull_data.get('original_hull_area', 0):.4f}")
+    print(f"New hull area: {hull_data.get('new_hull_area', 0):.4f}")
+    print(f"Area reduction: {hull_data.get('hull_area_reduction', 0):.4f}")
+    print(f"Reduction percentage: {hull_data.get('reduction_percentage', 0):.1f}%")
+    
+    # Create visualization
+    if output_dir:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f'hull_comparison_demo_depth_{depth}.png'
+        plot_hull_comparison(hull_data, depth, output_path=output_path)
+    else:
+        plot_hull_comparison(hull_data, depth)
+    
+    return hull_data
+
 def create_performance_summary_table(summary_df, output_dir):
+    """Create a formatted performance summary table."""
+    
+    print("\n=== Consolidated Performance Summary ===")
+    print("Dataset".ljust(15) + "Algorithm".ljust(20) + "AUC".ljust(8) + "Width".ljust(8) + "Quality".ljust(10) + "Time(s)".ljust(10))
+    print("=" * 80)
+    
+    for _, row in summary_df.iterrows():
+        dataset = str(row['dataset']).ljust(15)
+        algorithm = str(row['algorithm']).ljust(20)
+        auc = f"{row['auc_approx']:.3f}".ljust(8)
+        width = str(int(row['adaptive_width'])).ljust(8)
+        quality = f"{row['best_quality']:.3f}".ljust(10)
+        time_str = f"{row['search_time']:.2f}".ljust(10)
+        
+        print(f"{dataset}{algorithm}{auc}{width}{quality}{time_str}")
     """Create a formatted performance summary table."""
     
     print("\n=== Consolidated Performance Summary ===")
