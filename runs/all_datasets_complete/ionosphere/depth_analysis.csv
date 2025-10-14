@@ -1,0 +1,6 @@
+algorithm,alpha_value,depth,subgroups_start,candidates_generated,subgroups_after_pruning,best_quality,avg_coverage,cumulative_candidates,final_auc,final_width
+Pure ROC,pure_roc,0,1,0,1,0.0,351.0,0,0.7418165784832451,7
+Pure ROC,pure_roc,1,1,265,21,0.5374603174603174,136.0952380952381,265,0.7418165784832451,7
+Pure ROC,pure_roc,2,21,4490,10,0.5419047619047619,116.5,4755,0.7418165784832451,7
+Pure ROC,pure_roc,3,10,1851,6,0.5419047619047619,124.5,6606,0.7418165784832451,7
+Pure ROC,pure_roc,4,6,1035,4,0.5419047619047619,142.25,7641,0.7418165784832451,7

@@ -1,0 +1,2 @@
+alpha,adaptive_width,total_candidates,auc_approx,best_quality,best_tpr,best_fpr,best_precision,search_time
+pure_roc,18,4341,0.7737798581178161,0.5756555316091955,0.7931034482758621,0.21744791666666666,0.5242165242165242,11.331496238708496

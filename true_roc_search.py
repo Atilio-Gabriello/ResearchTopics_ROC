@@ -11,6 +11,10 @@ Key differences from enhanced_roc_search.py:
 - ROC convex hull-based pruning
 - Quality-driven subgroup selection
 """
+## TODO
+## Implement wide beam
+## Implement the 5 changes
+## get the pseudocode for the ROC search
 
 import pandas as pd
 import numpy as np
@@ -397,7 +401,6 @@ def generate_candidates(data, target_col, current_subgroups, depth, min_coverage
                             'tpr' in candidate_stats and 'fpr' in candidate_stats):
                             subgroups.append([candidate_stats.get('fpr').tolist(), candidate_stats.get('tpr').tolist()])
                             candidates.append(candidate_stats)
-                    # if (candidate_stats['tpr'] >= candidate_stats['fpr']):
 
     subgroups = np.array(subgroups)
     print(subgroups)
@@ -432,7 +435,6 @@ def generate_candidates(data, target_col, current_subgroups, depth, min_coverage
     plt.ylim(0,1)
     plt.show()
     plt.close()                    
-    print(candidates)
     return candidates
 
 def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50):
@@ -875,9 +877,32 @@ def get_dataset_info():
     """Define dataset information with target columns."""
     return {
         'adult.txt': 'target',
-        'agaricus-lepiota.txt': 'poisonous',
-        'ionosphere.txt': 'Attribute35'
+        'mushroom.txt': 'poisonous',
+        'ionosphere.txt': 'Attribute35',
+        'Credit-a.txt': 'A16',
+        'tic-tac-toe.txt': 'class',
+        'wisconsin.txt': 'Class'
     }
+
+def preprocess_categorical_data(df):
+    """
+    Simple preprocessing to convert categorical data to numerical.
+    Works without external dependencies by mapping unique values to integers.
+    """
+    # Create a copy to avoid modifying the original
+    df_processed = df.copy()
+    
+    # Process each column
+    for col in df_processed.columns:
+        if df_processed[col].dtype == 'object':  # String/categorical column
+            # Get unique values and create mapping
+            unique_vals = df_processed[col].unique()
+            # Create mapping: first unique value -> 0, second -> 1, etc.
+            mapping = {val: i for i, val in enumerate(unique_vals)}
+            # Apply mapping
+            df_processed[col] = df_processed[col].map(mapping)
+    
+    return df_processed
 
 def run_batch_analysis(data_dir, alphas=None, depth=3, min_coverage=50, output_dir='./runs/batch_analysis'):
     """
@@ -921,6 +946,10 @@ def run_batch_analysis(data_dir, alphas=None, depth=3, min_coverage=50, output_d
         if data is None:
             print(f"Failed to load {filename}")
             continue
+        
+        # Preprocess categorical data to numerical
+        data = preprocess_categorical_data(data)
+        print(f"Data shape after preprocessing: {data.shape}")
             
         # Run ROC search
         dataset_results = true_roc_search(data, target_col, alphas, depth, min_coverage)
