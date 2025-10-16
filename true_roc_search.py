@@ -12,7 +12,6 @@ Key differences from enhanced_roc_search.py:
 - Quality-driven subgroup selection
 """
 ## TODO
-## Implement wide beam
 ## Implement the 5 changes
 ## get the pseudocode for the ROC search
 
@@ -764,19 +763,27 @@ def select_furthest_points_from_diagonal(points, n_points, return_details=False,
         return np.array([])
 
 
-def select_points_below_hull(points, n_points, return_details=False, exclude_hull_points=False):
+def select_points_below_hull(points, distance_percentage=1.0, return_details=False, exclude_hull_points=True):
     """
-    Select the n points with smallest vertical distance below the convex hull.
-    Vertical distance is measured as the difference between hull TPR and point TPR at each FPR.
+    Select points within a percentage threshold of the maximum diagonal distance, 
+    measured by their vertical distance below the convex hull.
+    
+    NEW APPROACH:
+    1. Find the point furthest from the diagonal (max TPR - FPR)
+    2. Use that distance as the reference
+    3. Calculate threshold = reference_distance × (distance_percentage / 100)
+    4. Select points where vertical_distance_below_hull ≤ threshold
+    
+    Example: If max diagonal distance is 0.8 and distance_percentage=1.0:
+        - Reference distance: 0.8
+        - Threshold: 0.8 × 0.01 = 0.008
+        - Select points with hull_distance ≤ 0.008
     
     Args:
         points: Array of (fpr, tpr) points, shape (n, 2)
-        n_points: Number of points to select (closest below hull)
+        distance_percentage: Percentage of max diagonal distance to use as threshold (default 1.0%)
         return_details: If True, return detailed comparison information
-        exclude_hull_points: If True, only select from non-hull points (guarantees curve change)
-                           If False (default), may include original hull points
-                           NOTE: Set to True to force a different curve. Original behavior (False)
-                           allows selecting points that happen to be on the hull.
+        exclude_hull_points: If True, only select from non-hull points (default True)
     
     Returns:
         If return_details=False: Array of new hull points from selected points
@@ -823,8 +830,9 @@ def select_points_below_hull(points, n_points, return_details=False, exclude_hul
                                 if 1 <= i <= len(above_diagonal)]
         original_hull_points = above_diagonal[original_hull_indices]
         
-        # MODIFICATION: Option to exclude hull points from selection
-        # This ensures the new curve will be different from the original
+        # NEW APPROACH: Use furthest point from diagonal as reference
+        # MODIFICATION: Exclude hull points FIRST, then calculate reference from candidates
+        # This ensures the threshold is based on achievable distances
         if exclude_hull_points:
             # Select only from non-hull points
             non_hull_mask = np.ones(len(above_diagonal), dtype=bool)
@@ -841,15 +849,39 @@ def select_points_below_hull(points, n_points, return_details=False, exclude_hul
                         'all_points': above_diagonal,
                         'original_hull_area': original_hull_area,
                         'new_hull_area': 0,
+                        'reference_distance': 0,
+                        'threshold_distance': 0,
                         'note': 'Not enough non-hull points to form new hull'
                     }
                 return np.array([])
         else:
-            # Include all points (original behavior - may include hull points)
+            # Include all points (may include original hull points)
             candidate_points = above_diagonal
         
-        # Calculate vertical distance below hull for each candidate point
-        # For each point, find the hull TPR at that FPR and calculate difference
+        # Calculate reference from CANDIDATE points only (after hull exclusion)
+        diagonal_distances_candidates = candidate_points[:, 1] - candidate_points[:, 0]
+        max_diagonal_distance = np.max(diagonal_distances_candidates)
+        
+        if max_diagonal_distance <= 0:
+            # No points above diagonal (should not happen due to filter above)
+            if return_details:
+                return {
+                    'original_hull': original_hull_points,
+                    'new_hull': np.array([]),
+                    'selected_points': np.array([]),
+                    'all_points': above_diagonal,
+                    'original_hull_area': original_hull_area,
+                    'new_hull_area': 0,
+                    'reference_distance': max_diagonal_distance,
+                    'threshold_distance': 0,
+                    'note': 'No valid points above diagonal'
+                }
+            return np.array([])
+        
+        # Step 2: Calculate threshold based on percentage of max diagonal distance
+        threshold = max_diagonal_distance * (distance_percentage / 100.0)
+        
+        # Step 3: Calculate vertical distance below hull for each candidate point
         vertical_distances = np.zeros(len(candidate_points))
         
         # Sort hull points by FPR for interpolation
@@ -868,32 +900,33 @@ def select_points_below_hull(points, n_points, return_details=False, exclude_hul
             # Vertical distance (positive if below hull, negative if above/on hull)
             vertical_distances[i] = hull_tpr - tpr
         
-        # Select n_points with smallest distance below hull (largest positive distance)
-        # Points on or above hull will have distance <= 0
-        n_select = min(n_points, len(candidate_points))
-        
-        # Sort by distance descending (largest positive = furthest below hull)
-        # But prioritize points below hull (positive distance)
+        # Step 4: Select points where vertical_distance <= threshold
+        # Only consider points with positive distance (actually below hull)
         below_hull_mask = vertical_distances > 0
-        if np.any(below_hull_mask):
-            # Prefer points actually below hull
-            below_indices = np.argsort(vertical_distances[below_hull_mask])[-n_select:]
-            below_actual_indices = np.where(below_hull_mask)[0][below_indices]
-            
-            # If we need more points, add closest to hull (smallest distance)
-            if len(below_actual_indices) < n_select:
-                remaining = n_select - len(below_actual_indices)
-                not_below_mask = ~below_hull_mask
-                not_below_indices = np.argsort(vertical_distances[not_below_mask])[:remaining]
-                not_below_actual_indices = np.where(not_below_mask)[0][not_below_indices]
-                selected_indices = np.concatenate([below_actual_indices, not_below_actual_indices])
-            else:
-                selected_indices = below_actual_indices
-        else:
-            # No points below hull, select closest to hull
-            selected_indices = np.argsort(np.abs(vertical_distances))[:n_select]
+        within_threshold_mask = vertical_distances <= threshold
+        selection_mask = below_hull_mask & within_threshold_mask
+        
+        selected_indices = np.where(selection_mask)[0]
+        
+        if len(selected_indices) == 0:
+            # No points meet criteria, return empty
+            if return_details:
+                return {
+                    'original_hull': original_hull_points,
+                    'new_hull': np.array([]),
+                    'selected_points': np.array([]),
+                    'all_points': above_diagonal,
+                    'original_hull_area': original_hull_area,
+                    'new_hull_area': 0,
+                    'reference_distance': max_diagonal_distance,
+                    'threshold_distance': threshold,
+                    'n_selected': 0,
+                    'note': f'No points within threshold {threshold:.4f} (max_diagonal_dist={max_diagonal_distance:.4f}, {distance_percentage}%)'
+                }
+            return np.array([])
         
         selected_points = candidate_points[selected_indices]
+        n_select = len(selected_points)
         
         if len(selected_points) < 3:
             if return_details:
@@ -928,8 +961,11 @@ def select_points_below_hull(points, n_points, return_details=False, exclude_hul
                 'new_hull': new_hull_points,
                 'selected_points': selected_points,
                 'all_points': above_diagonal,
-                'selection_criterion': f'below_hull_{n_points}_points',
+                'selection_criterion': f'below_hull_{distance_percentage}pct_of_max_diagonal',
                 'n_selected': n_select,
+                'reference_distance': max_diagonal_distance,
+                'threshold_distance': threshold,
+                'distance_percentage': distance_percentage,
                 'original_hull_area': original_hull_area,
                 'new_hull_area': new_hull_area,
                 'hull_area_reduction': original_hull_area - new_hull_area,
@@ -981,19 +1017,27 @@ def select_points_below_hull(points, n_points, return_details=False, exclude_hul
         return np.array([])
 
 
-def select_points_above_diagonal(points, n_points, return_details=False, exclude_hull_points=False):
+def select_points_above_diagonal(points, distance_percentage=1.0, return_details=False, exclude_hull_points=True):
     """
-    Select the n points with largest vertical distance above the diagonal (y=x).
-    Vertical distance is measured as TPR value at each point (distance from diagonal in y-direction).
+    Select points at or above a percentage threshold of the maximum diagonal distance,
+    measured by their distance from the diagonal (TPR - FPR).
+    
+    NEW APPROACH:
+    1. Find the point furthest from the diagonal (max TPR - FPR)
+    2. Use that distance as the reference
+    3. Calculate threshold = reference_distance × ((100 - distance_percentage) / 100)
+    4. Select points where diagonal_distance ≥ threshold
+    
+    Example: If max diagonal distance is 0.8 and distance_percentage=1.0:
+        - Reference distance: 0.8
+        - Threshold: 0.8 × (100-1)/100 = 0.8 × 0.99 = 0.792
+        - Select points with diagonal_distance ≥ 0.792
     
     Args:
         points: Array of (fpr, tpr) points, shape (n, 2)
-        n_points: Number of points to select (highest above diagonal)
+        distance_percentage: Percentage threshold (default 1.0% means select points at least 99% as good)
         return_details: If True, return detailed comparison information
-        exclude_hull_points: If True, only select from non-hull points (guarantees curve change)
-                           If False (default), may include original hull points
-                           NOTE: Set to True to force a different curve. Original behavior (False)
-                           allows selecting best performing points even if on hull.
+        exclude_hull_points: If True, only select from non-hull points (default True)
     
     Returns:
         If return_details=False: Array of new hull points from selected points
@@ -1058,6 +1102,8 @@ def select_points_above_diagonal(points, n_points, return_details=False, exclude
                         'all_points': above_diagonal,
                         'original_hull_area': original_hull_area,
                         'new_hull_area': 0,
+                        'reference_distance': 0,
+                        'threshold_distance': 0,
                         'note': 'Not enough non-hull points to form new hull'
                     }
                 return np.array([])
@@ -1065,16 +1111,58 @@ def select_points_above_diagonal(points, n_points, return_details=False, exclude
             # Include all points (original behavior - may include hull points)
             candidate_points = above_diagonal
         
-        # Calculate vertical distance above diagonal for each candidate point
-        # Vertical distance from diagonal = TPR (since diagonal is at TPR=FPR)
-        # At any FPR value, the diagonal has TPR = FPR
-        # So vertical distance above diagonal = TPR - FPR (but we focus on TPR magnitude)
-        vertical_distances_above_diagonal = candidate_points[:, 1]  # TPR values
+        # NEW APPROACH: Use furthest point from diagonal as reference (same as function 4)
+        # Calculate reference from CANDIDATE points only (after hull exclusion)
+        # This ensures the threshold is based on achievable distances
+        diagonal_distances_candidates = candidate_points[:, 1] - candidate_points[:, 0]
+        max_diagonal_distance = np.max(diagonal_distances_candidates)
         
-        # Select n_points with highest TPR (largest vertical distance above diagonal)
-        n_select = min(n_points, len(candidate_points))
-        highest_indices = np.argsort(vertical_distances_above_diagonal)[-n_select:]
-        selected_points = candidate_points[highest_indices]
+        if max_diagonal_distance <= 0:
+            # No points above diagonal (should not happen due to filter above)
+            if return_details:
+                return {
+                    'original_hull': original_hull_points,
+                    'new_hull': np.array([]),
+                    'selected_points': np.array([]),
+                    'all_points': above_diagonal,
+                    'original_hull_area': original_hull_area,
+                    'new_hull_area': 0,
+                    'reference_distance': max_diagonal_distance,
+                    'threshold_distance': 0,
+                    'note': 'No valid points above diagonal'
+                }
+            return np.array([])
+        
+        # Step 2: Calculate threshold based on (100 - percentage) of max diagonal distance
+        # Example: 1% parameter means 99% threshold
+        threshold = max_diagonal_distance * ((100.0 - distance_percentage) / 100.0)
+        
+        # Step 3: Calculate diagonal distance for each candidate point
+        diagonal_distances = candidate_points[:, 1] - candidate_points[:, 0]  # TPR - FPR
+        
+        # Step 4: Select points where diagonal_distance >= threshold
+        selection_mask = diagonal_distances >= threshold
+        selected_indices = np.where(selection_mask)[0]
+        
+        if len(selected_indices) == 0:
+            # No points meet criteria, return empty
+            if return_details:
+                return {
+                    'original_hull': original_hull_points,
+                    'new_hull': np.array([]),
+                    'selected_points': np.array([]),
+                    'all_points': above_diagonal,
+                    'original_hull_area': original_hull_area,
+                    'new_hull_area': 0,
+                    'reference_distance': max_diagonal_distance,
+                    'threshold_distance': threshold,
+                    'n_selected': 0,
+                    'note': f'No points above threshold {threshold:.4f} (max_diagonal_dist={max_diagonal_distance:.4f}, {distance_percentage}%)'
+                }
+            return np.array([])
+        
+        selected_points = candidate_points[selected_indices]
+        n_select = len(selected_points)
         
         if len(selected_points) < 3:
             if return_details:
@@ -1109,8 +1197,11 @@ def select_points_above_diagonal(points, n_points, return_details=False, exclude
                 'new_hull': new_hull_points,
                 'selected_points': selected_points,
                 'all_points': above_diagonal,
-                'selection_criterion': f'above_diagonal_{n_points}_points',
+                'selection_criterion': f'above_diagonal_{distance_percentage}pct_threshold',
                 'n_selected': n_select,
+                'reference_distance': max_diagonal_distance,
+                'threshold_distance': threshold,
+                'distance_percentage': distance_percentage,
                 'original_hull_area': original_hull_area,
                 'new_hull_area': new_hull_area,
                 'hull_area_reduction': original_hull_area - new_hull_area,
@@ -1139,10 +1230,10 @@ def select_points_above_diagonal(points, n_points, return_details=False, exclude
                 'auc_reduction_percentage': ((original_metrics['auc'] - new_metrics['auc']) / original_metrics['auc'] * 100)
                                            if original_metrics['auc'] > 0 else 0,
                 'quality_reduction': original_metrics['max_quality'] - new_metrics['max_quality'],
-                # Vertical distance metrics (TPR values)
-                'avg_tpr_selected': np.mean(vertical_distances_above_diagonal[highest_indices]),
-                'max_tpr_selected': np.max(vertical_distances_above_diagonal[highest_indices]),
-                'min_tpr_selected': np.min(vertical_distances_above_diagonal[highest_indices])
+                # Diagonal distance metrics
+                'avg_diagonal_distance': np.mean(diagonal_distances[selected_indices]),
+                'max_diagonal_distance_selected': np.max(diagonal_distances[selected_indices]),
+                'min_diagonal_distance_selected': np.min(diagonal_distances[selected_indices])
             }
         
         return new_hull_points
@@ -2062,6 +2153,7 @@ def get_dataset_info():
         'tic-tac-toe.txt': 'class',
         'wisconsin.txt': 'Class',
         'Covertype.txt': 'Cover_Type',
+        'YPMSD.txt': '',
     }
 
 def preprocess_categorical_data(df):
