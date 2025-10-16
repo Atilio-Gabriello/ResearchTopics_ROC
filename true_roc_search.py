@@ -405,6 +405,763 @@ def remove_hull_points_and_recalculate(points, return_details=False):
             }
         return np.array([])
 
+def select_closest_points_to_hull(points, n_points, return_details=False, exclude_hull_points=False):
+    """
+    Select the n closest points to the convex hull and create a new ROC curve.
+    
+    Args:
+        points: Array of (fpr, tpr) points, shape (n, 2)
+        n_points: Number of closest points to select
+        return_details: If True, return detailed comparison information
+        exclude_hull_points: If True, only select from non-hull points (guarantees curve change)
+                           If False (default), may include original hull points (curve may stay same)
+                           NOTE: Set to True to force a different curve. Original behavior (False) 
+                           is useful to see if hull is stable with nearby points included.
+    
+    Returns:
+        If return_details=False: Array of new hull points from selected closest points
+        If return_details=True: Dictionary with original hull, new hull, and ROC metrics
+    """
+    if len(points) < 3:
+        if return_details:
+            return {
+                'original_hull': points,
+                'new_hull': np.array([]),
+                'selected_points': points,
+                'all_points': points,
+                'original_hull_area': 0,
+                'new_hull_area': 0
+            }
+        return np.array([])
+    
+    points_array = np.array(points)
+    
+    # Filter to only points above diagonal (TPR > FPR)
+    above_diagonal = points_array[points_array[:, 1] > points_array[:, 0]]
+    
+    if len(above_diagonal) < 3:
+        if return_details:
+            return {
+                'original_hull': above_diagonal,
+                'new_hull': np.array([]),
+                'selected_points': above_diagonal,
+                'all_points': above_diagonal,
+                'original_hull_area': 0,
+                'new_hull_area': 0
+            }
+        return np.array([])
+    
+    # Calculate original convex hull
+    extended_points = np.vstack([[0, 0], above_diagonal, [1, 1]])
+    
+    try:
+        original_hull = ConvexHull(extended_points)
+        original_hull_area = original_hull.volume
+        
+        # Get original hull points (excluding anchors)
+        original_hull_indices = [i - 1 for i in original_hull.vertices 
+                                if 1 <= i <= len(above_diagonal)]
+        original_hull_points = above_diagonal[original_hull_indices]
+        
+        # MODIFICATION: Option to exclude hull points from selection
+        # This ensures the new curve will be different from the original
+        if exclude_hull_points:
+            # Select only from non-hull points
+            non_hull_mask = np.ones(len(above_diagonal), dtype=bool)
+            non_hull_mask[original_hull_indices] = False
+            candidate_points = above_diagonal[non_hull_mask]
+            candidate_indices = np.where(non_hull_mask)[0]
+            
+            if len(candidate_points) < 3:
+                # Not enough non-hull points
+                if return_details:
+                    return {
+                        'original_hull': original_hull_points,
+                        'new_hull': np.array([]),
+                        'selected_points': candidate_points,
+                        'all_points': above_diagonal,
+                        'original_hull_area': original_hull_area,
+                        'new_hull_area': 0,
+                        'note': 'Not enough non-hull points to form new hull'
+                    }
+                return np.array([])
+        else:
+            # Include all points (original behavior - may include hull points)
+            candidate_points = above_diagonal
+            candidate_indices = np.arange(len(above_diagonal))
+        
+        # Calculate distance from each candidate point to the hull
+        # Use KDTree for efficient nearest neighbor search
+        if len(original_hull_points) > 0:
+            hull_tree = KDTree(original_hull_points)
+            distances, _ = hull_tree.query(candidate_points)
+        else:
+            distances = np.zeros(len(candidate_points))
+        
+        # Select n_points closest to the hull from candidates
+        n_select = min(n_points, len(candidate_points))
+        closest_indices_in_candidates = np.argsort(distances)[:n_select]
+        selected_points = candidate_points[closest_indices_in_candidates]
+        
+        if len(selected_points) < 3:
+            if return_details:
+                return {
+                    'original_hull': original_hull_points,
+                    'new_hull': np.array([]),
+                    'selected_points': selected_points,
+                    'all_points': above_diagonal,
+                    'original_hull_area': original_hull_area,
+                    'new_hull_area': 0
+                }
+            return np.array([])
+        
+        # Calculate new hull with selected points
+        new_extended_points = np.vstack([[0, 0], selected_points, [1, 1]])
+        new_hull = ConvexHull(new_extended_points)
+        new_hull_area = new_hull.volume
+        
+        # Get new hull points (excluding anchors)
+        new_hull_indices = [i - 1 for i in new_hull.vertices 
+                           if 1 <= i <= len(selected_points)]
+        new_hull_points = selected_points[new_hull_indices]
+        
+        if return_details:
+            # Calculate ROC metrics
+            original_metrics = calculate_roc_metrics(original_hull_points)
+            new_metrics = calculate_roc_metrics(new_hull_points)
+            all_metrics = calculate_roc_metrics(above_diagonal)
+            
+            return {
+                'original_hull': original_hull_points,
+                'new_hull': new_hull_points,
+                'selected_points': selected_points,
+                'all_points': above_diagonal,
+                'selection_criterion': f'closest_{n_points}_to_hull',
+                'n_selected': n_select,
+                'original_hull_area': original_hull_area,
+                'new_hull_area': new_hull_area,
+                'hull_area_reduction': original_hull_area - new_hull_area,
+                'reduction_percentage': ((original_hull_area - new_hull_area) / original_hull_area * 100) 
+                                       if original_hull_area > 0 else 0,
+                # Original hull metrics
+                'original_auc': original_metrics['auc'],
+                'original_num_subgroups': original_metrics['num_points'],
+                'original_best_tpr': original_metrics['best_tpr'],
+                'original_best_fpr': original_metrics['best_fpr'],
+                'original_avg_quality': original_metrics['avg_quality'],
+                'original_max_quality': original_metrics['max_quality'],
+                # New hull metrics
+                'new_auc': new_metrics['auc'],
+                'new_num_subgroups': new_metrics['num_points'],
+                'new_best_tpr': new_metrics['best_tpr'],
+                'new_best_fpr': new_metrics['best_fpr'],
+                'new_avg_quality': new_metrics['avg_quality'],
+                'new_max_quality': new_metrics['max_quality'],
+                # All points metrics
+                'all_points_auc': all_metrics['auc'],
+                'all_points_num': all_metrics['num_points'],
+                'all_points_max_quality': all_metrics['max_quality'],
+                # Comparison metrics
+                'auc_reduction': original_metrics['auc'] - new_metrics['auc'],
+                'auc_reduction_percentage': ((original_metrics['auc'] - new_metrics['auc']) / original_metrics['auc'] * 100)
+                                           if original_metrics['auc'] > 0 else 0,
+                'quality_reduction': original_metrics['max_quality'] - new_metrics['max_quality']
+            }
+        
+        return new_hull_points
+        
+    except Exception as e:
+        print(f"Error in closest points selection: {e}")
+        if return_details:
+            return {
+                'original_hull': np.array([]),
+                'new_hull': np.array([]),
+                'selected_points': np.array([]),
+                'all_points': points_array,
+                'original_hull_area': 0,
+                'new_hull_area': 0,
+                'error': str(e)
+            }
+        return np.array([])
+
+
+def select_furthest_points_from_diagonal(points, n_points, return_details=False, exclude_hull_points=False):
+    """
+    Select the n furthest points from the diagonal and create a new ROC curve.
+    Distance from diagonal is measured as TPR - FPR (ROC quality).
+    
+    Args:
+        points: Array of (fpr, tpr) points, shape (n, 2)
+        n_points: Number of furthest points to select
+        return_details: If True, return detailed comparison information
+        exclude_hull_points: If True, only select from non-hull points (guarantees curve change)
+                           If False (default), may include original hull points
+                           NOTE: Set to True to force a different curve. Original behavior (False)
+                           allows selecting best performers even if they're on the hull.
+    
+    Returns:
+        If return_details=False: Array of new hull points from selected furthest points
+        If return_details=True: Dictionary with original hull, new hull, and ROC metrics
+    """
+    if len(points) < 3:
+        if return_details:
+            return {
+                'original_hull': points,
+                'new_hull': np.array([]),
+                'selected_points': points,
+                'all_points': points,
+                'original_hull_area': 0,
+                'new_hull_area': 0
+            }
+        return np.array([])
+    
+    points_array = np.array(points)
+    
+    # Filter to only points above diagonal (TPR > FPR)
+    above_diagonal = points_array[points_array[:, 1] > points_array[:, 0]]
+    
+    if len(above_diagonal) < 3:
+        if return_details:
+            return {
+                'original_hull': above_diagonal,
+                'new_hull': np.array([]),
+                'selected_points': above_diagonal,
+                'all_points': above_diagonal,
+                'original_hull_area': 0,
+                'new_hull_area': 0
+            }
+        return np.array([])
+    
+    # Calculate original convex hull
+    extended_points = np.vstack([[0, 0], above_diagonal, [1, 1]])
+    
+    try:
+        original_hull = ConvexHull(extended_points)
+        original_hull_area = original_hull.volume
+        
+        # Get original hull points (excluding anchors)
+        original_hull_indices = [i - 1 for i in original_hull.vertices 
+                                if 1 <= i <= len(above_diagonal)]
+        original_hull_points = above_diagonal[original_hull_indices]
+        
+        # MODIFICATION: Option to exclude hull points from selection
+        # This ensures the new curve will be different from the original
+        if exclude_hull_points:
+            # Select only from non-hull points
+            non_hull_mask = np.ones(len(above_diagonal), dtype=bool)
+            non_hull_mask[original_hull_indices] = False
+            candidate_points = above_diagonal[non_hull_mask]
+            
+            if len(candidate_points) < 3:
+                # Not enough non-hull points
+                if return_details:
+                    return {
+                        'original_hull': original_hull_points,
+                        'new_hull': np.array([]),
+                        'selected_points': candidate_points,
+                        'all_points': above_diagonal,
+                        'original_hull_area': original_hull_area,
+                        'new_hull_area': 0,
+                        'note': 'Not enough non-hull points to form new hull'
+                    }
+                return np.array([])
+        else:
+            # Include all points (original behavior - may include hull points)
+            candidate_points = above_diagonal
+        
+        # Calculate distance from diagonal for each candidate point
+        # Distance = TPR - FPR (perpendicular distance to y=x line)
+        distances_from_diagonal = candidate_points[:, 1] - candidate_points[:, 0]
+        
+        # Select n_points furthest from the diagonal from candidates
+        n_select = min(n_points, len(candidate_points))
+        furthest_indices = np.argsort(distances_from_diagonal)[-n_select:]
+        selected_points = candidate_points[furthest_indices]
+        
+        if len(selected_points) < 3:
+            if return_details:
+                return {
+                    'original_hull': original_hull_points,
+                    'new_hull': np.array([]),
+                    'selected_points': selected_points,
+                    'all_points': above_diagonal,
+                    'original_hull_area': original_hull_area,
+                    'new_hull_area': 0
+                }
+            return np.array([])
+        
+        # Calculate new hull with selected points
+        new_extended_points = np.vstack([[0, 0], selected_points, [1, 1]])
+        new_hull = ConvexHull(new_extended_points)
+        new_hull_area = new_hull.volume
+        
+        # Get new hull points (excluding anchors)
+        new_hull_indices = [i - 1 for i in new_hull.vertices 
+                           if 1 <= i <= len(selected_points)]
+        new_hull_points = selected_points[new_hull_indices]
+        
+        if return_details:
+            # Calculate ROC metrics
+            original_metrics = calculate_roc_metrics(original_hull_points)
+            new_metrics = calculate_roc_metrics(new_hull_points)
+            all_metrics = calculate_roc_metrics(above_diagonal)
+            
+            return {
+                'original_hull': original_hull_points,
+                'new_hull': new_hull_points,
+                'selected_points': selected_points,
+                'all_points': above_diagonal,
+                'selection_criterion': f'furthest_{n_points}_from_diagonal',
+                'n_selected': n_select,
+                'original_hull_area': original_hull_area,
+                'new_hull_area': new_hull_area,
+                'hull_area_reduction': original_hull_area - new_hull_area,
+                'reduction_percentage': ((original_hull_area - new_hull_area) / original_hull_area * 100) 
+                                       if original_hull_area > 0 else 0,
+                # Original hull metrics
+                'original_auc': original_metrics['auc'],
+                'original_num_subgroups': original_metrics['num_points'],
+                'original_best_tpr': original_metrics['best_tpr'],
+                'original_best_fpr': original_metrics['best_fpr'],
+                'original_avg_quality': original_metrics['avg_quality'],
+                'original_max_quality': original_metrics['max_quality'],
+                # New hull metrics
+                'new_auc': new_metrics['auc'],
+                'new_num_subgroups': new_metrics['num_points'],
+                'new_best_tpr': new_metrics['best_tpr'],
+                'new_best_fpr': new_metrics['best_fpr'],
+                'new_avg_quality': new_metrics['avg_quality'],
+                'new_max_quality': new_metrics['max_quality'],
+                # All points metrics
+                'all_points_auc': all_metrics['auc'],
+                'all_points_num': all_metrics['num_points'],
+                'all_points_max_quality': all_metrics['max_quality'],
+                # Comparison metrics
+                'auc_reduction': original_metrics['auc'] - new_metrics['auc'],
+                'auc_reduction_percentage': ((original_metrics['auc'] - new_metrics['auc']) / original_metrics['auc'] * 100)
+                                           if original_metrics['auc'] > 0 else 0,
+                'quality_reduction': original_metrics['max_quality'] - new_metrics['max_quality'],
+                # Distance metrics
+                'avg_distance_from_diagonal': np.mean(distances_from_diagonal[furthest_indices]),
+                'min_distance_from_diagonal': np.min(distances_from_diagonal[furthest_indices]),
+                'max_distance_from_diagonal': np.max(distances_from_diagonal[furthest_indices])
+            }
+        
+        return new_hull_points
+        
+    except Exception as e:
+        print(f"Error in furthest points selection: {e}")
+        if return_details:
+            return {
+                'original_hull': np.array([]),
+                'new_hull': np.array([]),
+                'selected_points': np.array([]),
+                'all_points': points_array,
+                'original_hull_area': 0,
+                'new_hull_area': 0,
+                'error': str(e)
+            }
+        return np.array([])
+
+
+def select_points_below_hull(points, n_points, return_details=False, exclude_hull_points=False):
+    """
+    Select the n points with smallest vertical distance below the convex hull.
+    Vertical distance is measured as the difference between hull TPR and point TPR at each FPR.
+    
+    Args:
+        points: Array of (fpr, tpr) points, shape (n, 2)
+        n_points: Number of points to select (closest below hull)
+        return_details: If True, return detailed comparison information
+        exclude_hull_points: If True, only select from non-hull points (guarantees curve change)
+                           If False (default), may include original hull points
+                           NOTE: Set to True to force a different curve. Original behavior (False)
+                           allows selecting points that happen to be on the hull.
+    
+    Returns:
+        If return_details=False: Array of new hull points from selected points
+        If return_details=True: Dictionary with original hull, new hull, and ROC metrics
+    """
+    if len(points) < 3:
+        if return_details:
+            return {
+                'original_hull': points,
+                'new_hull': np.array([]),
+                'selected_points': points,
+                'all_points': points,
+                'original_hull_area': 0,
+                'new_hull_area': 0
+            }
+        return np.array([])
+    
+    points_array = np.array(points)
+    
+    # Filter to only points above diagonal (TPR > FPR)
+    above_diagonal = points_array[points_array[:, 1] > points_array[:, 0]]
+    
+    if len(above_diagonal) < 3:
+        if return_details:
+            return {
+                'original_hull': above_diagonal,
+                'new_hull': np.array([]),
+                'selected_points': above_diagonal,
+                'all_points': above_diagonal,
+                'original_hull_area': 0,
+                'new_hull_area': 0
+            }
+        return np.array([])
+    
+    # Calculate original convex hull
+    extended_points = np.vstack([[0, 0], above_diagonal, [1, 1]])
+    
+    try:
+        original_hull = ConvexHull(extended_points)
+        original_hull_area = original_hull.volume
+        
+        # Get original hull points (excluding anchors)
+        original_hull_indices = [i - 1 for i in original_hull.vertices 
+                                if 1 <= i <= len(above_diagonal)]
+        original_hull_points = above_diagonal[original_hull_indices]
+        
+        # MODIFICATION: Option to exclude hull points from selection
+        # This ensures the new curve will be different from the original
+        if exclude_hull_points:
+            # Select only from non-hull points
+            non_hull_mask = np.ones(len(above_diagonal), dtype=bool)
+            non_hull_mask[original_hull_indices] = False
+            candidate_points = above_diagonal[non_hull_mask]
+            
+            if len(candidate_points) < 3:
+                # Not enough non-hull points
+                if return_details:
+                    return {
+                        'original_hull': original_hull_points,
+                        'new_hull': np.array([]),
+                        'selected_points': candidate_points,
+                        'all_points': above_diagonal,
+                        'original_hull_area': original_hull_area,
+                        'new_hull_area': 0,
+                        'note': 'Not enough non-hull points to form new hull'
+                    }
+                return np.array([])
+        else:
+            # Include all points (original behavior - may include hull points)
+            candidate_points = above_diagonal
+        
+        # Calculate vertical distance below hull for each candidate point
+        # For each point, find the hull TPR at that FPR and calculate difference
+        vertical_distances = np.zeros(len(candidate_points))
+        
+        # Sort hull points by FPR for interpolation
+        hull_sorted_indices = np.argsort(original_hull_points[:, 0])
+        hull_sorted = original_hull_points[hull_sorted_indices]
+        
+        # Add anchors for complete hull
+        hull_with_anchors = np.vstack([[0, 0], hull_sorted, [1, 1]])
+        
+        for i, point in enumerate(candidate_points):
+            fpr, tpr = point
+            
+            # Find hull TPR at this FPR (linear interpolation)
+            hull_tpr = np.interp(fpr, hull_with_anchors[:, 0], hull_with_anchors[:, 1])
+            
+            # Vertical distance (positive if below hull, negative if above/on hull)
+            vertical_distances[i] = hull_tpr - tpr
+        
+        # Select n_points with smallest distance below hull (largest positive distance)
+        # Points on or above hull will have distance <= 0
+        n_select = min(n_points, len(candidate_points))
+        
+        # Sort by distance descending (largest positive = furthest below hull)
+        # But prioritize points below hull (positive distance)
+        below_hull_mask = vertical_distances > 0
+        if np.any(below_hull_mask):
+            # Prefer points actually below hull
+            below_indices = np.argsort(vertical_distances[below_hull_mask])[-n_select:]
+            below_actual_indices = np.where(below_hull_mask)[0][below_indices]
+            
+            # If we need more points, add closest to hull (smallest distance)
+            if len(below_actual_indices) < n_select:
+                remaining = n_select - len(below_actual_indices)
+                not_below_mask = ~below_hull_mask
+                not_below_indices = np.argsort(vertical_distances[not_below_mask])[:remaining]
+                not_below_actual_indices = np.where(not_below_mask)[0][not_below_indices]
+                selected_indices = np.concatenate([below_actual_indices, not_below_actual_indices])
+            else:
+                selected_indices = below_actual_indices
+        else:
+            # No points below hull, select closest to hull
+            selected_indices = np.argsort(np.abs(vertical_distances))[:n_select]
+        
+        selected_points = candidate_points[selected_indices]
+        
+        if len(selected_points) < 3:
+            if return_details:
+                return {
+                    'original_hull': original_hull_points,
+                    'new_hull': np.array([]),
+                    'selected_points': selected_points,
+                    'all_points': above_diagonal,
+                    'original_hull_area': original_hull_area,
+                    'new_hull_area': 0
+                }
+            return np.array([])
+        
+        # Calculate new hull with selected points
+        new_extended_points = np.vstack([[0, 0], selected_points, [1, 1]])
+        new_hull = ConvexHull(new_extended_points)
+        new_hull_area = new_hull.volume
+        
+        # Get new hull points (excluding anchors)
+        new_hull_indices = [i - 1 for i in new_hull.vertices 
+                           if 1 <= i <= len(selected_points)]
+        new_hull_points = selected_points[new_hull_indices]
+        
+        if return_details:
+            # Calculate ROC metrics
+            original_metrics = calculate_roc_metrics(original_hull_points)
+            new_metrics = calculate_roc_metrics(new_hull_points)
+            all_metrics = calculate_roc_metrics(above_diagonal)
+            
+            return {
+                'original_hull': original_hull_points,
+                'new_hull': new_hull_points,
+                'selected_points': selected_points,
+                'all_points': above_diagonal,
+                'selection_criterion': f'below_hull_{n_points}_points',
+                'n_selected': n_select,
+                'original_hull_area': original_hull_area,
+                'new_hull_area': new_hull_area,
+                'hull_area_reduction': original_hull_area - new_hull_area,
+                'reduction_percentage': ((original_hull_area - new_hull_area) / original_hull_area * 100) 
+                                       if original_hull_area > 0 else 0,
+                # Original hull metrics
+                'original_auc': original_metrics['auc'],
+                'original_num_subgroups': original_metrics['num_points'],
+                'original_best_tpr': original_metrics['best_tpr'],
+                'original_best_fpr': original_metrics['best_fpr'],
+                'original_avg_quality': original_metrics['avg_quality'],
+                'original_max_quality': original_metrics['max_quality'],
+                # New hull metrics
+                'new_auc': new_metrics['auc'],
+                'new_num_subgroups': new_metrics['num_points'],
+                'new_best_tpr': new_metrics['best_tpr'],
+                'new_best_fpr': new_metrics['best_fpr'],
+                'new_avg_quality': new_metrics['avg_quality'],
+                'new_max_quality': new_metrics['max_quality'],
+                # All points metrics
+                'all_points_auc': all_metrics['auc'],
+                'all_points_num': all_metrics['num_points'],
+                'all_points_max_quality': all_metrics['max_quality'],
+                # Comparison metrics
+                'auc_reduction': original_metrics['auc'] - new_metrics['auc'],
+                'auc_reduction_percentage': ((original_metrics['auc'] - new_metrics['auc']) / original_metrics['auc'] * 100)
+                                           if original_metrics['auc'] > 0 else 0,
+                'quality_reduction': original_metrics['max_quality'] - new_metrics['max_quality'],
+                # Vertical distance metrics
+                'avg_vertical_distance': np.mean(vertical_distances[selected_indices]),
+                'max_vertical_distance': np.max(vertical_distances[selected_indices]),
+                'min_vertical_distance': np.min(vertical_distances[selected_indices])
+            }
+        
+        return new_hull_points
+        
+    except Exception as e:
+        print(f"Error in below hull selection: {e}")
+        if return_details:
+            return {
+                'original_hull': np.array([]),
+                'new_hull': np.array([]),
+                'selected_points': np.array([]),
+                'all_points': points_array,
+                'original_hull_area': 0,
+                'new_hull_area': 0,
+                'error': str(e)
+            }
+        return np.array([])
+
+
+def select_points_above_diagonal(points, n_points, return_details=False, exclude_hull_points=False):
+    """
+    Select the n points with largest vertical distance above the diagonal (y=x).
+    Vertical distance is measured as TPR value at each point (distance from diagonal in y-direction).
+    
+    Args:
+        points: Array of (fpr, tpr) points, shape (n, 2)
+        n_points: Number of points to select (highest above diagonal)
+        return_details: If True, return detailed comparison information
+        exclude_hull_points: If True, only select from non-hull points (guarantees curve change)
+                           If False (default), may include original hull points
+                           NOTE: Set to True to force a different curve. Original behavior (False)
+                           allows selecting best performing points even if on hull.
+    
+    Returns:
+        If return_details=False: Array of new hull points from selected points
+        If return_details=True: Dictionary with original hull, new hull, and ROC metrics
+    """
+    if len(points) < 3:
+        if return_details:
+            return {
+                'original_hull': points,
+                'new_hull': np.array([]),
+                'selected_points': points,
+                'all_points': points,
+                'original_hull_area': 0,
+                'new_hull_area': 0
+            }
+        return np.array([])
+    
+    points_array = np.array(points)
+    
+    # Filter to only points above diagonal (TPR > FPR)
+    above_diagonal = points_array[points_array[:, 1] > points_array[:, 0]]
+    
+    if len(above_diagonal) < 3:
+        if return_details:
+            return {
+                'original_hull': above_diagonal,
+                'new_hull': np.array([]),
+                'selected_points': above_diagonal,
+                'all_points': above_diagonal,
+                'original_hull_area': 0,
+                'new_hull_area': 0
+            }
+        return np.array([])
+    
+    # Calculate original convex hull
+    extended_points = np.vstack([[0, 0], above_diagonal, [1, 1]])
+    
+    try:
+        original_hull = ConvexHull(extended_points)
+        original_hull_area = original_hull.volume
+        
+        # Get original hull points (excluding anchors)
+        original_hull_indices = [i - 1 for i in original_hull.vertices 
+                                if 1 <= i <= len(above_diagonal)]
+        original_hull_points = above_diagonal[original_hull_indices]
+        
+        # MODIFICATION: Option to exclude hull points from selection
+        # This ensures the new curve will be different from the original
+        if exclude_hull_points:
+            # Select only from non-hull points
+            non_hull_mask = np.ones(len(above_diagonal), dtype=bool)
+            non_hull_mask[original_hull_indices] = False
+            candidate_points = above_diagonal[non_hull_mask]
+            
+            if len(candidate_points) < 3:
+                # Not enough non-hull points
+                if return_details:
+                    return {
+                        'original_hull': original_hull_points,
+                        'new_hull': np.array([]),
+                        'selected_points': candidate_points,
+                        'all_points': above_diagonal,
+                        'original_hull_area': original_hull_area,
+                        'new_hull_area': 0,
+                        'note': 'Not enough non-hull points to form new hull'
+                    }
+                return np.array([])
+        else:
+            # Include all points (original behavior - may include hull points)
+            candidate_points = above_diagonal
+        
+        # Calculate vertical distance above diagonal for each candidate point
+        # Vertical distance from diagonal = TPR (since diagonal is at TPR=FPR)
+        # At any FPR value, the diagonal has TPR = FPR
+        # So vertical distance above diagonal = TPR - FPR (but we focus on TPR magnitude)
+        vertical_distances_above_diagonal = candidate_points[:, 1]  # TPR values
+        
+        # Select n_points with highest TPR (largest vertical distance above diagonal)
+        n_select = min(n_points, len(candidate_points))
+        highest_indices = np.argsort(vertical_distances_above_diagonal)[-n_select:]
+        selected_points = candidate_points[highest_indices]
+        
+        if len(selected_points) < 3:
+            if return_details:
+                return {
+                    'original_hull': original_hull_points,
+                    'new_hull': np.array([]),
+                    'selected_points': selected_points,
+                    'all_points': above_diagonal,
+                    'original_hull_area': original_hull_area,
+                    'new_hull_area': 0
+                }
+            return np.array([])
+        
+        # Calculate new hull with selected points
+        new_extended_points = np.vstack([[0, 0], selected_points, [1, 1]])
+        new_hull = ConvexHull(new_extended_points)
+        new_hull_area = new_hull.volume
+        
+        # Get new hull points (excluding anchors)
+        new_hull_indices = [i - 1 for i in new_hull.vertices 
+                           if 1 <= i <= len(selected_points)]
+        new_hull_points = selected_points[new_hull_indices]
+        
+        if return_details:
+            # Calculate ROC metrics
+            original_metrics = calculate_roc_metrics(original_hull_points)
+            new_metrics = calculate_roc_metrics(new_hull_points)
+            all_metrics = calculate_roc_metrics(above_diagonal)
+            
+            return {
+                'original_hull': original_hull_points,
+                'new_hull': new_hull_points,
+                'selected_points': selected_points,
+                'all_points': above_diagonal,
+                'selection_criterion': f'above_diagonal_{n_points}_points',
+                'n_selected': n_select,
+                'original_hull_area': original_hull_area,
+                'new_hull_area': new_hull_area,
+                'hull_area_reduction': original_hull_area - new_hull_area,
+                'reduction_percentage': ((original_hull_area - new_hull_area) / original_hull_area * 100) 
+                                       if original_hull_area > 0 else 0,
+                # Original hull metrics
+                'original_auc': original_metrics['auc'],
+                'original_num_subgroups': original_metrics['num_points'],
+                'original_best_tpr': original_metrics['best_tpr'],
+                'original_best_fpr': original_metrics['best_fpr'],
+                'original_avg_quality': original_metrics['avg_quality'],
+                'original_max_quality': original_metrics['max_quality'],
+                # New hull metrics
+                'new_auc': new_metrics['auc'],
+                'new_num_subgroups': new_metrics['num_points'],
+                'new_best_tpr': new_metrics['best_tpr'],
+                'new_best_fpr': new_metrics['best_fpr'],
+                'new_avg_quality': new_metrics['avg_quality'],
+                'new_max_quality': new_metrics['max_quality'],
+                # All points metrics
+                'all_points_auc': all_metrics['auc'],
+                'all_points_num': all_metrics['num_points'],
+                'all_points_max_quality': all_metrics['max_quality'],
+                # Comparison metrics
+                'auc_reduction': original_metrics['auc'] - new_metrics['auc'],
+                'auc_reduction_percentage': ((original_metrics['auc'] - new_metrics['auc']) / original_metrics['auc'] * 100)
+                                           if original_metrics['auc'] > 0 else 0,
+                'quality_reduction': original_metrics['max_quality'] - new_metrics['max_quality'],
+                # Vertical distance metrics (TPR values)
+                'avg_tpr_selected': np.mean(vertical_distances_above_diagonal[highest_indices]),
+                'max_tpr_selected': np.max(vertical_distances_above_diagonal[highest_indices]),
+                'min_tpr_selected': np.min(vertical_distances_above_diagonal[highest_indices])
+            }
+        
+        return new_hull_points
+        
+    except Exception as e:
+        print(f"Error in above diagonal selection: {e}")
+        if return_details:
+            return {
+                'original_hull': np.array([]),
+                'new_hull': np.array([]),
+                'selected_points': np.array([]),
+                'all_points': points_array,
+                'original_hull_area': 0,
+                'new_hull_area': 0,
+                'error': str(e)
+            }
+        return np.array([])
+
+
 def plot_hull_comparison(hull_data, depth, output_path=None, title_suffix=""):
     """
     Create a visualization comparing original hull with recalculated hull after removing original hull points.
@@ -1303,7 +2060,8 @@ def get_dataset_info():
         'ionosphere.txt': 'Attribute35',
         'Credit-a.txt': 'A16',
         'tic-tac-toe.txt': 'class',
-        'wisconsin.txt': 'Class'
+        'wisconsin.txt': 'Class',
+        'Covertype.txt': 'Cover_Type',
     }
 
 def preprocess_categorical_data(df):
