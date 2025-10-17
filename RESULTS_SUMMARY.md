@@ -12,6 +12,8 @@
 
 ## 📈 All Files Generated
 
+📊 **Wide beam Results**: See [wide_beam_summary.csv](runs/wide_beam_search/wide_beam_summary.csv) for complete wide beam search results across all 7 datasets.
+
 ### CSV Results
 ✅ [`comprehensive_results.csv`](runs/comprehensive_all_methods/comprehensive_results.csv) - **All 480 experiment results** (main data file)  
 ✅ `summary_by_method.csv` - Method-level aggregation  

@@ -1,0 +1,9 @@
+,auc,auc,time_seconds
+,mean,std,sum
+dataset,,,
+Covertype,0.624,0.0959,1997.9356
+adult,0.6012,0.0696,14.3327
+ionosphere,0.5188,0.0122,22.1229
+mushroom,0.5761,0.0255,33.2728
+tic-tac-toe,0.5244,0.0169,8.5544
+wisconsin,0.4994,0.0023,10.6284

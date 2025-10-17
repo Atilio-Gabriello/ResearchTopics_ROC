@@ -1,0 +1,5 @@
+Dataset,Wide Beam,above_diagonal_percentage,basic_roc_search,below_hull_percentage,closest_points_to_hull,furthest_from_diagonal,remove_hull_points
+adult,0.8068286413433909,,0.6638688712284481,,,,
+ionosphere,0.943121693121693,,0.5212522045855378,,,,
+mushroom,0.8245525328475941,,0.6011420437553647,,,,
+tic-tac-toe,0.5933927402902344,,0.5356465799299435,,,,
