@@ -1,0 +1,5 @@
+depth,total_points,original_hull_points,new_hull_points,remaining_points,subgroups_removed,original_hull_area,new_hull_area,hull_area_reduction,area_reduction_percentage,original_auc,new_auc,all_points_auc,auc_reduction,auc_reduction_percentage,original_max_quality,original_avg_quality,new_max_quality,new_avg_quality,quality_reduction,original_best_tpr,original_best_fpr,new_best_tpr,new_best_fpr
+1,92,3,0,0,0,0.4769493974219057,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+2,1075,4,0,0,0,0.4826751515669361,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+3,965,4,0,0,0,0.4808487748420247,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+4,994,6,0,0,0,0.47967294166080854,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0

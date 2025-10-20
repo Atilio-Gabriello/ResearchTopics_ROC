@@ -1,0 +1,6 @@
+depth,Closest to Hull (n=10)_subgroups,Closest to Hull (n=10)_candidates,Closest to Hull (n=10)_quality,Closest to Hull (n=10)_coverage,Closest to Hull (n=10)_auc,Closest to Hull (n=10)_width
+0,1,0,0.0,1000.0,0.59,960
+1,10,120,0.518,753.9,0.59,960
+2,11,1042,0.549,436.6,0.59,960
+3,44,880,0.029,978.0,0.59,960
+4,960,4140,0.455,945.8,0.59,960
