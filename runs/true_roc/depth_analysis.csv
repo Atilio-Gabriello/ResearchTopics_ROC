@@ -1,4 +1,0 @@
-algorithm,alpha_value,depth,subgroups_start,candidates_generated,subgroups_after_pruning,best_quality,avg_coverage,cumulative_candidates,final_auc,final_width
-Pure ROC,pure_roc,0,1,0,1,0.0,699.0,0,0.969704107702622,9
-Pure ROC,pure_roc,1,1,103,10,0.8130968127706608,294.9,103,0.969704107702622,9
-Pure ROC,pure_roc,2,10,766,9,0.8716048487923318,292.1111111111111,869,0.969704107702622,9

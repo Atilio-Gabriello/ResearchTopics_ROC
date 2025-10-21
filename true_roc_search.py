@@ -12,8 +12,14 @@ Key differences from enhanced_roc_search.py:
 - Quality-driven subgroup selection
 """
 ## TODO
-## Implement the 5 changes
-## get the pseudocode for the ROC search
+
+## Implement a change on each of the methods to store the points on the curve and then doing the calculation that we need, after that we re-add those points together with the new ones that we have based on the calculation result
+
+## Make sure the Final_width in the table is the same as the width on the last depth level
+
+## Make sure to look into the n closest/furthest functions to understand why it's grabbing so many candidates at some point
+
+## Add AUC at each level
 
 import pandas as pd
 import numpy as np
@@ -269,17 +275,26 @@ def calculate_roc_metrics(points):
         'avg_quality': np.mean(qualities)
     }
 
+# Change this function to keep the points of the original curve, keep them at each level
 def remove_hull_points_and_recalculate(points, return_details=False):
     """
-    Remove points on the original convex hull and recalculate the hull with remaining points.
+    Remove points on the original convex hull temporarily, recalculate hull with remaining points,
+    then combine original hull points with new hull points and return the final hull.
+    
+    MODIFIED BEHAVIOR:
+    1. Identify original hull points
+    2. Remove hull points temporarily from candidate pool
+    3. Calculate new hull from remaining points
+    4. Combine original hull + new hull points
+    5. Return final hull from combined set
     
     Args:
         points: Array of (fpr, tpr) points, shape (n, 2)
         return_details: If True, return detailed comparison information
     
     Returns:
-        If return_details=False: Array of new hull points
-        If return_details=True: Dictionary with original hull, new hull, removed points, and ROC metrics
+        If return_details=False: Array of final hull points from combined set
+        If return_details=True: Dictionary with original hull, new hull, combined hull, and ROC metrics
     """
     if len(points) < 3:
         if return_details:
@@ -358,6 +373,22 @@ def remove_hull_points_and_recalculate(points, return_details=False):
         # Calculate new hull area
         new_hull_area = new_hull.volume
         
+        # MODIFICATION: Combine original hull points with new hull points
+        combined_points = np.vstack([original_hull_points, new_hull_points])
+        
+        # Calculate final hull from combined points
+        final_extended_points = np.vstack([[0, 0], combined_points, [1, 1]])
+        final_hull = ConvexHull(final_extended_points)
+        final_hull_indices = set(final_hull.vertices)
+        
+        # Get final hull points (excluding anchors)
+        final_hull_points_indices = [i - 1 for i in final_hull_indices 
+                                     if 1 <= i <= len(combined_points)]
+        final_hull_points = combined_points[final_hull_points_indices]
+        
+        # Calculate final hull area
+        final_hull_area = final_hull.volume
+        
         if return_details:
             # Calculate ROC metrics for original hull
             original_metrics = calculate_roc_metrics(original_hull_points)
@@ -365,19 +396,25 @@ def remove_hull_points_and_recalculate(points, return_details=False):
             # Calculate ROC metrics for new hull
             new_metrics = calculate_roc_metrics(new_hull_points)
             
+            # Calculate ROC metrics for final combined hull
+            final_metrics = calculate_roc_metrics(final_hull_points)
+            
             # Calculate metrics for all points (for reference)
             all_metrics = calculate_roc_metrics(above_diagonal)
             
             return {
                 'original_hull': original_hull_points,
                 'new_hull': new_hull_points,
+                'final_hull': final_hull_points,
+                'combined_points': combined_points,
                 'removed_points': original_hull_points,
                 'remaining_points': remaining_points,
                 'all_points': above_diagonal,
                 'original_hull_area': original_hull_area,
                 'new_hull_area': new_hull_area,
-                'hull_area_reduction': original_hull_area - new_hull_area,
-                'reduction_percentage': ((original_hull_area - new_hull_area) / original_hull_area * 100) 
+                'final_hull_area': final_hull_area,
+                'hull_area_reduction': original_hull_area - final_hull_area,
+                'reduction_percentage': ((original_hull_area - final_hull_area) / original_hull_area * 100) 
                                        if original_hull_area > 0 else 0,
                 # Original hull metrics
                 'original_auc': original_metrics['auc'],
@@ -386,27 +423,35 @@ def remove_hull_points_and_recalculate(points, return_details=False):
                 'original_best_fpr': original_metrics['best_fpr'],
                 'original_avg_quality': original_metrics['avg_quality'],
                 'original_max_quality': original_metrics['max_quality'],
-                # New hull metrics
+                # New hull metrics (from non-hull points only)
                 'new_auc': new_metrics['auc'],
                 'new_num_subgroups': new_metrics['num_points'],
                 'new_best_tpr': new_metrics['best_tpr'],
                 'new_best_fpr': new_metrics['best_fpr'],
                 'new_avg_quality': new_metrics['avg_quality'],
                 'new_max_quality': new_metrics['max_quality'],
+                # Final combined hull metrics
+                'final_auc': final_metrics['auc'],
+                'final_num_subgroups': final_metrics['num_points'],
+                'final_best_tpr': final_metrics['best_tpr'],
+                'final_best_fpr': final_metrics['best_fpr'],
+                'final_avg_quality': final_metrics['avg_quality'],
+                'final_max_quality': final_metrics['max_quality'],
                 # All points metrics (for reference)
                 'all_points_auc': all_metrics['auc'],
                 'all_points_num': all_metrics['num_points'],
                 'all_points_max_quality': all_metrics['max_quality'],
                 # Comparison metrics
-                'auc_reduction': original_metrics['auc'] - new_metrics['auc'],
-                'auc_reduction_percentage': ((original_metrics['auc'] - new_metrics['auc']) / original_metrics['auc'] * 100)
+                'auc_reduction': original_metrics['auc'] - final_metrics['auc'],
+                'auc_reduction_percentage': ((original_metrics['auc'] - final_metrics['auc']) / original_metrics['auc'] * 100)
                                            if original_metrics['auc'] > 0 else 0,
                 'subgroups_removed': original_metrics['num_points'],
                 'subgroups_remaining': len(remaining_points),
-                'quality_reduction': original_metrics['max_quality'] - new_metrics['max_quality']
+                'quality_reduction': original_metrics['max_quality'] - final_metrics['max_quality']
             }
         
-        return new_hull_points
+        # CHANGED: Return combined_points (all hull + new) instead of just final_hull_points
+        return combined_points
         
     except Exception as e:
         print(f"Error in hull recalculation: {e}")
@@ -422,22 +467,27 @@ def remove_hull_points_and_recalculate(points, return_details=False):
             }
         return np.array([])
 
-def select_closest_points_to_hull(points, n_points, return_details=False, exclude_hull_points=False):
+def select_closest_points_to_hull(points, n_points, return_details=False, exclude_hull_points=True):
     """
-    Select the n closest points to the convex hull and create a new ROC curve.
+    Select the n closest points to the convex hull, combine with original hull points,
+    and return the final hull.
+    
+    MODIFIED BEHAVIOR:
+    1. Identify original hull points
+    2. Always exclude hull points from selection (exclude_hull_points now defaults to True)
+    3. Select n closest non-hull points
+    4. Combine original hull + selected points
+    5. Return final hull from combined set
     
     Args:
         points: Array of (fpr, tpr) points, shape (n, 2)
-        n_points: Number of closest points to select
+        n_points: Number of closest points to select from non-hull points
         return_details: If True, return detailed comparison information
-        exclude_hull_points: If True, only select from non-hull points (guarantees curve change)
-                           If False (default), may include original hull points (curve may stay same)
-                           NOTE: Set to True to force a different curve. Original behavior (False) 
-                           is useful to see if hull is stable with nearby points included.
+        exclude_hull_points: Kept for compatibility but now defaults to True
     
     Returns:
-        If return_details=False: Array of new hull points from selected closest points
-        If return_details=True: Dictionary with original hull, new hull, and ROC metrics
+        If return_details=False: Array of final hull points from combined set
+        If return_details=True: Dictionary with original hull, selected points, final hull, and ROC metrics
     """
     if len(points) < 3:
         if return_details:
@@ -480,32 +530,32 @@ def select_closest_points_to_hull(points, n_points, return_details=False, exclud
                                 if 1 <= i <= len(above_diagonal)]
         original_hull_points = above_diagonal[original_hull_indices]
         
-        # MODIFICATION: Option to exclude hull points from selection
-        # This ensures the new curve will be different from the original
-        if exclude_hull_points:
-            # Select only from non-hull points
-            non_hull_mask = np.ones(len(above_diagonal), dtype=bool)
-            non_hull_mask[original_hull_indices] = False
-            candidate_points = above_diagonal[non_hull_mask]
-            candidate_indices = np.where(non_hull_mask)[0]
-            
-            if len(candidate_points) < 3:
-                # Not enough non-hull points
-                if return_details:
-                    return {
-                        'original_hull': original_hull_points,
-                        'new_hull': np.array([]),
-                        'selected_points': candidate_points,
-                        'all_points': above_diagonal,
-                        'original_hull_area': original_hull_area,
-                        'new_hull_area': 0,
-                        'note': 'Not enough non-hull points to form new hull'
-                    }
-                return np.array([])
-        else:
-            # Include all points (original behavior - may include hull points)
-            candidate_points = above_diagonal
-            candidate_indices = np.arange(len(above_diagonal))
+        # ALWAYS exclude hull points from selection to ensure diversity
+        # Select only from non-hull points
+        non_hull_mask = np.ones(len(above_diagonal), dtype=bool)
+        non_hull_mask[original_hull_indices] = False
+        candidate_points = above_diagonal[non_hull_mask]
+        candidate_indices = np.where(non_hull_mask)[0]
+        
+        if len(candidate_points) < 3:
+            # Not enough non-hull points, return original hull
+            if return_details:
+                original_metrics = calculate_roc_metrics(original_hull_points)
+                return {
+                    'original_hull': original_hull_points,
+                    'new_hull': np.array([]),
+                    'final_hull': original_hull_points,
+                    'selected_points': candidate_points,
+                    'combined_points': original_hull_points,
+                    'all_points': above_diagonal,
+                    'original_hull_area': original_hull_area,
+                    'new_hull_area': 0,
+                    'final_hull_area': original_hull_area,
+                    'note': 'Not enough non-hull points to select from, returning original hull',
+                    'original_auc': original_metrics['auc'],
+                    'final_auc': original_metrics['auc']
+                }
+            return original_hull_points
         
         # Calculate distance from each candidate point to the hull
         # Use KDTree for efficient nearest neighbor search
@@ -521,18 +571,25 @@ def select_closest_points_to_hull(points, n_points, return_details=False, exclud
         selected_points = candidate_points[closest_indices_in_candidates]
         
         if len(selected_points) < 3:
+            # Not enough points selected, return original hull
             if return_details:
+                original_metrics = calculate_roc_metrics(original_hull_points)
                 return {
                     'original_hull': original_hull_points,
                     'new_hull': np.array([]),
+                    'final_hull': original_hull_points,
                     'selected_points': selected_points,
+                    'combined_points': original_hull_points,
                     'all_points': above_diagonal,
                     'original_hull_area': original_hull_area,
-                    'new_hull_area': 0
+                    'new_hull_area': 0,
+                    'final_hull_area': original_hull_area,
+                    'original_auc': original_metrics['auc'],
+                    'final_auc': original_metrics['auc']
                 }
-            return np.array([])
+            return original_hull_points
         
-        # Calculate new hull with selected points
+        # Calculate new hull with selected points only (for comparison)
         new_extended_points = np.vstack([[0, 0], selected_points, [1, 1]])
         new_hull = ConvexHull(new_extended_points)
         new_hull_area = new_hull.volume
@@ -542,23 +599,41 @@ def select_closest_points_to_hull(points, n_points, return_details=False, exclud
                            if 1 <= i <= len(selected_points)]
         new_hull_points = selected_points[new_hull_indices]
         
+        # MODIFICATION: Combine original hull points with selected points
+        # CHANGED: Return combined_points instead of final_hull_points to keep ALL points (hull + selected)
+        combined_points = np.vstack([original_hull_points, selected_points])
+        
+        # Calculate final hull from combined points (for metrics only)
+        final_extended_points = np.vstack([[0, 0], combined_points, [1, 1]])
+        final_hull = ConvexHull(final_extended_points)
+        final_hull_area = final_hull.volume
+        
+        # Get final hull points (excluding anchors) - for metrics only
+        final_hull_indices = [i - 1 for i in final_hull.vertices 
+                             if 1 <= i <= len(combined_points)]
+        final_hull_points = combined_points[final_hull_indices]
+        
         if return_details:
             # Calculate ROC metrics
             original_metrics = calculate_roc_metrics(original_hull_points)
             new_metrics = calculate_roc_metrics(new_hull_points)
+            final_metrics = calculate_roc_metrics(final_hull_points)
             all_metrics = calculate_roc_metrics(above_diagonal)
             
             return {
                 'original_hull': original_hull_points,
                 'new_hull': new_hull_points,
-                'selected_points': selected_points,
+                'final_hull': final_hull_points,
+                'selected_points': combined_points,  # Return ALL combined points
+                'combined_points': combined_points,
                 'all_points': above_diagonal,
                 'selection_criterion': f'closest_{n_points}_to_hull',
                 'n_selected': n_select,
                 'original_hull_area': original_hull_area,
                 'new_hull_area': new_hull_area,
-                'hull_area_reduction': original_hull_area - new_hull_area,
-                'reduction_percentage': ((original_hull_area - new_hull_area) / original_hull_area * 100) 
+                'final_hull_area': final_hull_area,
+                'hull_area_reduction': original_hull_area - final_hull_area,
+                'reduction_percentage': ((original_hull_area - final_hull_area) / original_hull_area * 100) 
                                        if original_hull_area > 0 else 0,
                 # Original hull metrics
                 'original_auc': original_metrics['auc'],
@@ -567,25 +642,33 @@ def select_closest_points_to_hull(points, n_points, return_details=False, exclud
                 'original_best_fpr': original_metrics['best_fpr'],
                 'original_avg_quality': original_metrics['avg_quality'],
                 'original_max_quality': original_metrics['max_quality'],
-                # New hull metrics
+                # New hull metrics (from selected points only)
                 'new_auc': new_metrics['auc'],
                 'new_num_subgroups': new_metrics['num_points'],
                 'new_best_tpr': new_metrics['best_tpr'],
                 'new_best_fpr': new_metrics['best_fpr'],
                 'new_avg_quality': new_metrics['avg_quality'],
                 'new_max_quality': new_metrics['max_quality'],
+                # Final combined hull metrics
+                'final_auc': final_metrics['auc'],
+                'final_num_subgroups': final_metrics['num_points'],
+                'final_best_tpr': final_metrics['best_tpr'],
+                'final_best_fpr': final_metrics['best_fpr'],
+                'final_avg_quality': final_metrics['avg_quality'],
+                'final_max_quality': final_metrics['max_quality'],
                 # All points metrics
                 'all_points_auc': all_metrics['auc'],
                 'all_points_num': all_metrics['num_points'],
                 'all_points_max_quality': all_metrics['max_quality'],
                 # Comparison metrics
-                'auc_reduction': original_metrics['auc'] - new_metrics['auc'],
-                'auc_reduction_percentage': ((original_metrics['auc'] - new_metrics['auc']) / original_metrics['auc'] * 100)
+                'auc_reduction': original_metrics['auc'] - final_metrics['auc'],
+                'auc_reduction_percentage': ((original_metrics['auc'] - final_metrics['auc']) / original_metrics['auc'] * 100)
                                            if original_metrics['auc'] > 0 else 0,
-                'quality_reduction': original_metrics['max_quality'] - new_metrics['max_quality']
+                'quality_reduction': original_metrics['max_quality'] - final_metrics['max_quality']
             }
         
-        return new_hull_points
+        # CHANGED: Return combined_points (all hull + selected) instead of just final_hull_points
+        return combined_points
         
     except Exception as e:
         print(f"Error in closest points selection: {e}")
@@ -602,23 +685,28 @@ def select_closest_points_to_hull(points, n_points, return_details=False, exclud
         return np.array([])
 
 
-def select_furthest_points_from_diagonal(points, n_points, return_details=False, exclude_hull_points=False):
+def select_furthest_points_from_diagonal(points, n_points, return_details=False, exclude_hull_points=True):
     """
-    Select the n furthest points from the diagonal and create a new ROC curve.
+    Select the n furthest points from the diagonal, combine with original hull points,
+    and return the final hull.
     Distance from diagonal is measured as TPR - FPR (ROC quality).
+    
+    MODIFIED BEHAVIOR:
+    1. Identify original hull points
+    2. Always exclude hull points from selection (exclude_hull_points now defaults to True)
+    3. Select n furthest non-hull points from diagonal
+    4. Combine original hull + selected points
+    5. Return final hull from combined set
     
     Args:
         points: Array of (fpr, tpr) points, shape (n, 2)
-        n_points: Number of furthest points to select
+        n_points: Number of furthest points to select from non-hull points
         return_details: If True, return detailed comparison information
-        exclude_hull_points: If True, only select from non-hull points (guarantees curve change)
-                           If False (default), may include original hull points
-                           NOTE: Set to True to force a different curve. Original behavior (False)
-                           allows selecting best performers even if they're on the hull.
+        exclude_hull_points: Kept for compatibility but now defaults to True
     
     Returns:
-        If return_details=False: Array of new hull points from selected furthest points
-        If return_details=True: Dictionary with original hull, new hull, and ROC metrics
+        If return_details=False: Array of final hull points from combined set
+        If return_details=True: Dictionary with original hull, selected points, final hull, and ROC metrics
     """
     if len(points) < 3:
         if return_details:
@@ -661,30 +749,31 @@ def select_furthest_points_from_diagonal(points, n_points, return_details=False,
                                 if 1 <= i <= len(above_diagonal)]
         original_hull_points = above_diagonal[original_hull_indices]
         
-        # MODIFICATION: Option to exclude hull points from selection
-        # This ensures the new curve will be different from the original
-        if exclude_hull_points:
-            # Select only from non-hull points
-            non_hull_mask = np.ones(len(above_diagonal), dtype=bool)
-            non_hull_mask[original_hull_indices] = False
-            candidate_points = above_diagonal[non_hull_mask]
-            
-            if len(candidate_points) < 3:
-                # Not enough non-hull points
-                if return_details:
-                    return {
-                        'original_hull': original_hull_points,
-                        'new_hull': np.array([]),
-                        'selected_points': candidate_points,
-                        'all_points': above_diagonal,
-                        'original_hull_area': original_hull_area,
-                        'new_hull_area': 0,
-                        'note': 'Not enough non-hull points to form new hull'
-                    }
-                return np.array([])
-        else:
-            # Include all points (original behavior - may include hull points)
-            candidate_points = above_diagonal
+        # ALWAYS exclude hull points from selection to ensure diversity
+        # Select only from non-hull points
+        non_hull_mask = np.ones(len(above_diagonal), dtype=bool)
+        non_hull_mask[original_hull_indices] = False
+        candidate_points = above_diagonal[non_hull_mask]
+        
+        if len(candidate_points) < 3:
+            # Not enough non-hull points, return original hull
+            if return_details:
+                original_metrics = calculate_roc_metrics(original_hull_points)
+                return {
+                    'original_hull': original_hull_points,
+                    'new_hull': np.array([]),
+                    'final_hull': original_hull_points,
+                    'selected_points': candidate_points,
+                    'combined_points': original_hull_points,
+                    'all_points': above_diagonal,
+                    'original_hull_area': original_hull_area,
+                    'new_hull_area': 0,
+                    'final_hull_area': original_hull_area,
+                    'note': 'Not enough non-hull points to select from, returning original hull',
+                    'original_auc': original_metrics['auc'],
+                    'final_auc': original_metrics['auc']
+                }
+            return original_hull_points
         
         # Calculate distance from diagonal for each candidate point
         # Distance = TPR - FPR (perpendicular distance to y=x line)
@@ -696,18 +785,25 @@ def select_furthest_points_from_diagonal(points, n_points, return_details=False,
         selected_points = candidate_points[furthest_indices]
         
         if len(selected_points) < 3:
+            # Not enough points selected, return original hull
             if return_details:
+                original_metrics = calculate_roc_metrics(original_hull_points)
                 return {
                     'original_hull': original_hull_points,
                     'new_hull': np.array([]),
+                    'final_hull': original_hull_points,
                     'selected_points': selected_points,
+                    'combined_points': original_hull_points,
                     'all_points': above_diagonal,
                     'original_hull_area': original_hull_area,
-                    'new_hull_area': 0
+                    'new_hull_area': 0,
+                    'final_hull_area': original_hull_area,
+                    'original_auc': original_metrics['auc'],
+                    'final_auc': original_metrics['auc']
                 }
-            return np.array([])
+            return original_hull_points
         
-        # Calculate new hull with selected points
+        # Calculate new hull with selected points only (for comparison)
         new_extended_points = np.vstack([[0, 0], selected_points, [1, 1]])
         new_hull = ConvexHull(new_extended_points)
         new_hull_area = new_hull.volume
@@ -717,23 +813,41 @@ def select_furthest_points_from_diagonal(points, n_points, return_details=False,
                            if 1 <= i <= len(selected_points)]
         new_hull_points = selected_points[new_hull_indices]
         
+        # MODIFICATION: Combine original hull points with selected points
+        # CHANGED: Return combined_points instead of final_hull_points to keep ALL points (hull + selected)
+        combined_points = np.vstack([original_hull_points, selected_points])
+        
+        # Calculate final hull from combined points (for metrics only)
+        final_extended_points = np.vstack([[0, 0], combined_points, [1, 1]])
+        final_hull = ConvexHull(final_extended_points)
+        final_hull_area = final_hull.volume
+        
+        # Get final hull points (excluding anchors) - for metrics only
+        final_hull_indices = [i - 1 for i in final_hull.vertices 
+                             if 1 <= i <= len(combined_points)]
+        final_hull_points = combined_points[final_hull_indices]
+        
         if return_details:
             # Calculate ROC metrics
             original_metrics = calculate_roc_metrics(original_hull_points)
             new_metrics = calculate_roc_metrics(new_hull_points)
+            final_metrics = calculate_roc_metrics(final_hull_points)
             all_metrics = calculate_roc_metrics(above_diagonal)
             
             return {
                 'original_hull': original_hull_points,
                 'new_hull': new_hull_points,
-                'selected_points': selected_points,
+                'final_hull': final_hull_points,
+                'selected_points': combined_points,  # Return ALL combined points
+                'combined_points': combined_points,
                 'all_points': above_diagonal,
                 'selection_criterion': f'furthest_{n_points}_from_diagonal',
                 'n_selected': n_select,
                 'original_hull_area': original_hull_area,
                 'new_hull_area': new_hull_area,
-                'hull_area_reduction': original_hull_area - new_hull_area,
-                'reduction_percentage': ((original_hull_area - new_hull_area) / original_hull_area * 100) 
+                'final_hull_area': final_hull_area,
+                'hull_area_reduction': original_hull_area - final_hull_area,
+                'reduction_percentage': ((original_hull_area - final_hull_area) / original_hull_area * 100) 
                                        if original_hull_area > 0 else 0,
                 # Original hull metrics
                 'original_auc': original_metrics['auc'],
@@ -742,29 +856,37 @@ def select_furthest_points_from_diagonal(points, n_points, return_details=False,
                 'original_best_fpr': original_metrics['best_fpr'],
                 'original_avg_quality': original_metrics['avg_quality'],
                 'original_max_quality': original_metrics['max_quality'],
-                # New hull metrics
+                # New hull metrics (from selected points only)
                 'new_auc': new_metrics['auc'],
                 'new_num_subgroups': new_metrics['num_points'],
                 'new_best_tpr': new_metrics['best_tpr'],
                 'new_best_fpr': new_metrics['best_fpr'],
                 'new_avg_quality': new_metrics['avg_quality'],
                 'new_max_quality': new_metrics['max_quality'],
+                # Final combined hull metrics
+                'final_auc': final_metrics['auc'],
+                'final_num_subgroups': final_metrics['num_points'],
+                'final_best_tpr': final_metrics['best_tpr'],
+                'final_best_fpr': final_metrics['best_fpr'],
+                'final_avg_quality': final_metrics['avg_quality'],
+                'final_max_quality': final_metrics['max_quality'],
                 # All points metrics
                 'all_points_auc': all_metrics['auc'],
                 'all_points_num': all_metrics['num_points'],
                 'all_points_max_quality': all_metrics['max_quality'],
                 # Comparison metrics
-                'auc_reduction': original_metrics['auc'] - new_metrics['auc'],
-                'auc_reduction_percentage': ((original_metrics['auc'] - new_metrics['auc']) / original_metrics['auc'] * 100)
+                'auc_reduction': original_metrics['auc'] - final_metrics['auc'],
+                'auc_reduction_percentage': ((original_metrics['auc'] - final_metrics['auc']) / original_metrics['auc'] * 100)
                                            if original_metrics['auc'] > 0 else 0,
-                'quality_reduction': original_metrics['max_quality'] - new_metrics['max_quality'],
+                'quality_reduction': original_metrics['max_quality'] - final_metrics['max_quality'],
                 # Distance metrics
                 'avg_distance_from_diagonal': np.mean(distances_from_diagonal[furthest_indices]),
                 'min_distance_from_diagonal': np.min(distances_from_diagonal[furthest_indices]),
                 'max_distance_from_diagonal': np.max(distances_from_diagonal[furthest_indices])
             }
         
-        return new_hull_points
+        # CHANGED: Return combined_points (all hull + selected) instead of just final_hull_points
+        return combined_points
         
     except Exception as e:
         print(f"Error in furthest points selection: {e}")
@@ -783,8 +905,15 @@ def select_furthest_points_from_diagonal(points, n_points, return_details=False,
 
 def select_points_below_hull(points, distance_percentage=1.0, return_details=False, exclude_hull_points=True):
     """
-    Select points within a percentage threshold of the maximum diagonal distance, 
-    measured by their vertical distance below the convex hull.
+    Select points within a percentage threshold below the convex hull,
+    combine with original hull points, and return the final hull.
+    
+    MODIFIED BEHAVIOR:
+    1. Identify original hull points
+    2. Always exclude hull points from selection (exclude_hull_points defaults to True)
+    3. Select points within threshold distance below hull
+    4. Combine original hull + selected points
+    5. Return final hull from combined set
     
     NEW APPROACH:
     1. Find the point furthest from the diagonal (max TPR - FPR)
@@ -801,11 +930,11 @@ def select_points_below_hull(points, distance_percentage=1.0, return_details=Fal
         points: Array of (fpr, tpr) points, shape (n, 2)
         distance_percentage: Percentage of max diagonal distance to use as threshold (default 1.0%)
         return_details: If True, return detailed comparison information
-        exclude_hull_points: If True, only select from non-hull points (default True)
+        exclude_hull_points: Kept for compatibility but now defaults to True
     
     Returns:
-        If return_details=False: Array of new hull points from selected points
-        If return_details=True: Dictionary with original hull, new hull, and ROC metrics
+        If return_details=False: Array of final hull points from combined set
+        If return_details=True: Dictionary with original hull, selected points, final hull, and ROC metrics
     """
     if len(points) < 3:
         if return_details:
@@ -848,33 +977,33 @@ def select_points_below_hull(points, distance_percentage=1.0, return_details=Fal
                                 if 1 <= i <= len(above_diagonal)]
         original_hull_points = above_diagonal[original_hull_indices]
         
-        # NEW APPROACH: Use furthest point from diagonal as reference
-        # MODIFICATION: Exclude hull points FIRST, then calculate reference from candidates
-        # This ensures the threshold is based on achievable distances
-        if exclude_hull_points:
-            # Select only from non-hull points
-            non_hull_mask = np.ones(len(above_diagonal), dtype=bool)
-            non_hull_mask[original_hull_indices] = False
-            candidate_points = above_diagonal[non_hull_mask]
-            
-            if len(candidate_points) < 3:
-                # Not enough non-hull points
-                if return_details:
-                    return {
-                        'original_hull': original_hull_points,
-                        'new_hull': np.array([]),
-                        'selected_points': candidate_points,
-                        'all_points': above_diagonal,
-                        'original_hull_area': original_hull_area,
-                        'new_hull_area': 0,
-                        'reference_distance': 0,
-                        'threshold_distance': 0,
-                        'note': 'Not enough non-hull points to form new hull'
-                    }
-                return np.array([])
-        else:
-            # Include all points (may include original hull points)
-            candidate_points = above_diagonal
+        # ALWAYS exclude hull points from selection to ensure diversity
+        # Select only from non-hull points
+        non_hull_mask = np.ones(len(above_diagonal), dtype=bool)
+        non_hull_mask[original_hull_indices] = False
+        candidate_points = above_diagonal[non_hull_mask]
+        
+        if len(candidate_points) < 3:
+            # Not enough non-hull points, return original hull
+            if return_details:
+                original_metrics = calculate_roc_metrics(original_hull_points)
+                return {
+                    'original_hull': original_hull_points,
+                    'new_hull': np.array([]),
+                    'final_hull': original_hull_points,
+                    'selected_points': candidate_points,
+                    'combined_points': original_hull_points,
+                    'all_points': above_diagonal,
+                    'original_hull_area': original_hull_area,
+                    'new_hull_area': 0,
+                    'final_hull_area': original_hull_area,
+                    'reference_distance': 0,
+                    'threshold_distance': 0,
+                    'note': 'Not enough non-hull points to select from, returning original hull',
+                    'original_auc': original_metrics['auc'],
+                    'final_auc': original_metrics['auc']
+                }
+            return original_hull_points
         
         # Calculate reference from CANDIDATE points only (after hull exclusion)
         diagonal_distances_candidates = candidate_points[:, 1] - candidate_points[:, 0]
@@ -883,18 +1012,24 @@ def select_points_below_hull(points, distance_percentage=1.0, return_details=Fal
         if max_diagonal_distance <= 0:
             # No points above diagonal (should not happen due to filter above)
             if return_details:
+                original_metrics = calculate_roc_metrics(original_hull_points)
                 return {
                     'original_hull': original_hull_points,
                     'new_hull': np.array([]),
+                    'final_hull': original_hull_points,
                     'selected_points': np.array([]),
+                    'combined_points': original_hull_points,
                     'all_points': above_diagonal,
                     'original_hull_area': original_hull_area,
                     'new_hull_area': 0,
+                    'final_hull_area': original_hull_area,
                     'reference_distance': max_diagonal_distance,
                     'threshold_distance': 0,
-                    'note': 'No valid points above diagonal'
+                    'note': 'No valid points above diagonal',
+                    'original_auc': original_metrics['auc'],
+                    'final_auc': original_metrics['auc']
                 }
-            return np.array([])
+            return original_hull_points
         
         # Step 2: Calculate threshold based on percentage of max diagonal distance
         threshold = max_diagonal_distance * (distance_percentage / 100.0)
@@ -927,38 +1062,51 @@ def select_points_below_hull(points, distance_percentage=1.0, return_details=Fal
         selected_indices = np.where(selection_mask)[0]
         
         if len(selected_indices) == 0:
-            # No points meet criteria, return empty
+            # No points meet criteria, return original hull
             if return_details:
+                original_metrics = calculate_roc_metrics(original_hull_points)
                 return {
                     'original_hull': original_hull_points,
                     'new_hull': np.array([]),
+                    'final_hull': original_hull_points,
                     'selected_points': np.array([]),
+                    'combined_points': original_hull_points,
                     'all_points': above_diagonal,
                     'original_hull_area': original_hull_area,
                     'new_hull_area': 0,
+                    'final_hull_area': original_hull_area,
                     'reference_distance': max_diagonal_distance,
                     'threshold_distance': threshold,
                     'n_selected': 0,
-                    'note': f'No points within threshold {threshold:.4f} (max_diagonal_dist={max_diagonal_distance:.4f}, {distance_percentage}%)'
+                    'note': f'No points within threshold {threshold:.4f} (max_diagonal_dist={max_diagonal_distance:.4f}, {distance_percentage}%), returning original hull',
+                    'original_auc': original_metrics['auc'],
+                    'final_auc': original_metrics['auc']
                 }
-            return np.array([])
+            return original_hull_points
         
         selected_points = candidate_points[selected_indices]
         n_select = len(selected_points)
         
         if len(selected_points) < 3:
+            # Not enough selected points, return original hull
             if return_details:
+                original_metrics = calculate_roc_metrics(original_hull_points)
                 return {
                     'original_hull': original_hull_points,
                     'new_hull': np.array([]),
+                    'final_hull': original_hull_points,
                     'selected_points': selected_points,
+                    'combined_points': original_hull_points,
                     'all_points': above_diagonal,
                     'original_hull_area': original_hull_area,
-                    'new_hull_area': 0
+                    'new_hull_area': 0,
+                    'final_hull_area': original_hull_area,
+                    'original_auc': original_metrics['auc'],
+                    'final_auc': original_metrics['auc']
                 }
-            return np.array([])
+            return original_hull_points
         
-        # Calculate new hull with selected points
+        # Calculate new hull with selected points only (for comparison)
         new_extended_points = np.vstack([[0, 0], selected_points, [1, 1]])
         new_hull = ConvexHull(new_extended_points)
         new_hull_area = new_hull.volume
@@ -968,16 +1116,32 @@ def select_points_below_hull(points, distance_percentage=1.0, return_details=Fal
                            if 1 <= i <= len(selected_points)]
         new_hull_points = selected_points[new_hull_indices]
         
+        # MODIFICATION: Combine original hull points with selected points
+        combined_points = np.vstack([original_hull_points, selected_points])
+        
+        # Calculate final hull from combined points
+        final_extended_points = np.vstack([[0, 0], combined_points, [1, 1]])
+        final_hull = ConvexHull(final_extended_points)
+        final_hull_area = final_hull.volume
+        
+        # Get final hull points (excluding anchors)
+        final_hull_indices = [i - 1 for i in final_hull.vertices 
+                             if 1 <= i <= len(combined_points)]
+        final_hull_points = combined_points[final_hull_indices]
+        
         if return_details:
             # Calculate ROC metrics
             original_metrics = calculate_roc_metrics(original_hull_points)
             new_metrics = calculate_roc_metrics(new_hull_points)
+            final_metrics = calculate_roc_metrics(final_hull_points)
             all_metrics = calculate_roc_metrics(above_diagonal)
             
             return {
                 'original_hull': original_hull_points,
                 'new_hull': new_hull_points,
+                'final_hull': final_hull_points,
                 'selected_points': selected_points,
+                'combined_points': combined_points,
                 'all_points': above_diagonal,
                 'selection_criterion': f'below_hull_{distance_percentage}pct_of_max_diagonal',
                 'n_selected': n_select,
@@ -986,8 +1150,9 @@ def select_points_below_hull(points, distance_percentage=1.0, return_details=Fal
                 'distance_percentage': distance_percentage,
                 'original_hull_area': original_hull_area,
                 'new_hull_area': new_hull_area,
-                'hull_area_reduction': original_hull_area - new_hull_area,
-                'reduction_percentage': ((original_hull_area - new_hull_area) / original_hull_area * 100) 
+                'final_hull_area': final_hull_area,
+                'hull_area_reduction': original_hull_area - final_hull_area,
+                'reduction_percentage': ((original_hull_area - final_hull_area) / original_hull_area * 100) 
                                        if original_hull_area > 0 else 0,
                 # Original hull metrics
                 'original_auc': original_metrics['auc'],
@@ -996,29 +1161,37 @@ def select_points_below_hull(points, distance_percentage=1.0, return_details=Fal
                 'original_best_fpr': original_metrics['best_fpr'],
                 'original_avg_quality': original_metrics['avg_quality'],
                 'original_max_quality': original_metrics['max_quality'],
-                # New hull metrics
+                # New hull metrics (from selected points only)
                 'new_auc': new_metrics['auc'],
                 'new_num_subgroups': new_metrics['num_points'],
                 'new_best_tpr': new_metrics['best_tpr'],
                 'new_best_fpr': new_metrics['best_fpr'],
                 'new_avg_quality': new_metrics['avg_quality'],
                 'new_max_quality': new_metrics['max_quality'],
+                # Final combined hull metrics
+                'final_auc': final_metrics['auc'],
+                'final_num_subgroups': final_metrics['num_points'],
+                'final_best_tpr': final_metrics['best_tpr'],
+                'final_best_fpr': final_metrics['best_fpr'],
+                'final_avg_quality': final_metrics['avg_quality'],
+                'final_max_quality': final_metrics['max_quality'],
                 # All points metrics
                 'all_points_auc': all_metrics['auc'],
                 'all_points_num': all_metrics['num_points'],
                 'all_points_max_quality': all_metrics['max_quality'],
                 # Comparison metrics
-                'auc_reduction': original_metrics['auc'] - new_metrics['auc'],
-                'auc_reduction_percentage': ((original_metrics['auc'] - new_metrics['auc']) / original_metrics['auc'] * 100)
+                'auc_reduction': original_metrics['auc'] - final_metrics['auc'],
+                'auc_reduction_percentage': ((original_metrics['auc'] - final_metrics['auc']) / original_metrics['auc'] * 100)
                                            if original_metrics['auc'] > 0 else 0,
-                'quality_reduction': original_metrics['max_quality'] - new_metrics['max_quality'],
+                'quality_reduction': original_metrics['max_quality'] - final_metrics['max_quality'],
                 # Vertical distance metrics
                 'avg_vertical_distance': np.mean(vertical_distances[selected_indices]),
                 'max_vertical_distance': np.max(vertical_distances[selected_indices]),
                 'min_vertical_distance': np.min(vertical_distances[selected_indices])
             }
         
-        return new_hull_points
+        # CHANGED: Return combined_points (all hull + selected) instead of just final_hull_points
+        return combined_points
         
     except Exception as e:
         print(f"Error in below hull selection: {e}")
@@ -1037,8 +1210,15 @@ def select_points_below_hull(points, distance_percentage=1.0, return_details=Fal
 
 def select_points_above_diagonal(points, distance_percentage=1.0, return_details=False, exclude_hull_points=True):
     """
-    Select points at or above a percentage threshold of the maximum diagonal distance,
-    measured by their distance from the diagonal (TPR - FPR).
+    Select points at or above a percentage threshold from the diagonal,
+    combine with original hull points, and return the final hull.
+    
+    MODIFIED BEHAVIOR:
+    1. Identify original hull points
+    2. Optionally exclude hull points from selection (controlled by exclude_hull_points parameter)
+    3. Select points above threshold distance from diagonal
+    4. Combine original hull + selected points (if exclude_hull_points=True)
+    5. Return final hull from combined set
     
     NEW APPROACH:
     1. Find the point furthest from the diagonal (max TPR - FPR)
@@ -1055,11 +1235,11 @@ def select_points_above_diagonal(points, distance_percentage=1.0, return_details
         points: Array of (fpr, tpr) points, shape (n, 2)
         distance_percentage: Percentage threshold (default 1.0% means select points at least 99% as good)
         return_details: If True, return detailed comparison information
-        exclude_hull_points: If True, only select from non-hull points (default True)
+        exclude_hull_points: Kept for compatibility but now defaults to True
     
     Returns:
-        If return_details=False: Array of new hull points from selected points
-        If return_details=True: Dictionary with original hull, new hull, and ROC metrics
+        If return_details=False: Array of final hull points from combined set
+        If return_details=True: Dictionary with original hull, selected points, final hull, and ROC metrics
     """
     if len(points) < 3:
         if return_details:
@@ -1102,54 +1282,64 @@ def select_points_above_diagonal(points, distance_percentage=1.0, return_details
                                 if 1 <= i <= len(above_diagonal)]
         original_hull_points = above_diagonal[original_hull_indices]
         
-        # MODIFICATION: Option to exclude hull points from selection
-        # This ensures the new curve will be different from the original
+        # Optionally exclude hull points from selection
+        # If exclude_hull_points=False, include all points (hull + non-hull) for better quality
         if exclude_hull_points:
-            # Select only from non-hull points
             non_hull_mask = np.ones(len(above_diagonal), dtype=bool)
             non_hull_mask[original_hull_indices] = False
             candidate_points = above_diagonal[non_hull_mask]
-            
-            if len(candidate_points) < 3:
-                # Not enough non-hull points
-                if return_details:
-                    return {
-                        'original_hull': original_hull_points,
-                        'new_hull': np.array([]),
-                        'selected_points': candidate_points,
-                        'all_points': above_diagonal,
-                        'original_hull_area': original_hull_area,
-                        'new_hull_area': 0,
-                        'reference_distance': 0,
-                        'threshold_distance': 0,
-                        'note': 'Not enough non-hull points to form new hull'
-                    }
-                return np.array([])
         else:
-            # Include all points (original behavior - may include hull points)
+            # Include all points including hull points (the best quality ones)
             candidate_points = above_diagonal
         
-        # NEW APPROACH: Use furthest point from diagonal as reference (same as function 4)
-        # Calculate reference from CANDIDATE points only (after hull exclusion)
-        # This ensures the threshold is based on achievable distances
+        if len(candidate_points) < 3:
+            # Not enough candidate points, return original hull
+            if return_details:
+                original_metrics = calculate_roc_metrics(original_hull_points)
+                return {
+                    'original_hull': original_hull_points,
+                    'new_hull': np.array([]),
+                    'final_hull': original_hull_points,
+                    'selected_points': candidate_points,
+                    'combined_points': original_hull_points,
+                    'all_points': above_diagonal,
+                    'original_hull_area': original_hull_area,
+                    'new_hull_area': 0,
+                    'final_hull_area': original_hull_area,
+                    'reference_distance': 0,
+                    'threshold_distance': 0,
+                    'note': 'Not enough candidate points to select from, returning original hull',
+                    'original_auc': original_metrics['auc'],
+                    'final_auc': original_metrics['auc']
+                }
+            return original_hull_points
+        
+        # NEW APPROACH: Use furthest point from diagonal as reference
+        # Calculate reference from candidate points (all points or non-hull depending on exclude_hull_points)
         diagonal_distances_candidates = candidate_points[:, 1] - candidate_points[:, 0]
         max_diagonal_distance = np.max(diagonal_distances_candidates)
         
         if max_diagonal_distance <= 0:
             # No points above diagonal (should not happen due to filter above)
             if return_details:
+                original_metrics = calculate_roc_metrics(original_hull_points)
                 return {
                     'original_hull': original_hull_points,
                     'new_hull': np.array([]),
+                    'final_hull': original_hull_points,
                     'selected_points': np.array([]),
+                    'combined_points': original_hull_points,
                     'all_points': above_diagonal,
                     'original_hull_area': original_hull_area,
                     'new_hull_area': 0,
+                    'final_hull_area': original_hull_area,
                     'reference_distance': max_diagonal_distance,
                     'threshold_distance': 0,
-                    'note': 'No valid points above diagonal'
+                    'note': 'No valid points above diagonal',
+                    'original_auc': original_metrics['auc'],
+                    'final_auc': original_metrics['auc']
                 }
-            return np.array([])
+            return original_hull_points
         
         # Step 2: Calculate threshold based on (100 - percentage) of max diagonal distance
         # Example: 1% parameter means 99% threshold
@@ -1163,38 +1353,51 @@ def select_points_above_diagonal(points, distance_percentage=1.0, return_details
         selected_indices = np.where(selection_mask)[0]
         
         if len(selected_indices) == 0:
-            # No points meet criteria, return empty
+            # No points meet criteria, return original hull
             if return_details:
+                original_metrics = calculate_roc_metrics(original_hull_points)
                 return {
                     'original_hull': original_hull_points,
                     'new_hull': np.array([]),
+                    'final_hull': original_hull_points,
                     'selected_points': np.array([]),
+                    'combined_points': original_hull_points,
                     'all_points': above_diagonal,
                     'original_hull_area': original_hull_area,
                     'new_hull_area': 0,
+                    'final_hull_area': original_hull_area,
                     'reference_distance': max_diagonal_distance,
                     'threshold_distance': threshold,
                     'n_selected': 0,
-                    'note': f'No points above threshold {threshold:.4f} (max_diagonal_dist={max_diagonal_distance:.4f}, {distance_percentage}%)'
+                    'note': f'No points above threshold {threshold:.4f} (max_diagonal_dist={max_diagonal_distance:.4f}, {distance_percentage}%), returning original hull',
+                    'original_auc': original_metrics['auc'],
+                    'final_auc': original_metrics['auc']
                 }
-            return np.array([])
+            return original_hull_points
         
         selected_points = candidate_points[selected_indices]
         n_select = len(selected_points)
         
         if len(selected_points) < 3:
+            # Not enough selected points, return original hull
             if return_details:
+                original_metrics = calculate_roc_metrics(original_hull_points)
                 return {
                     'original_hull': original_hull_points,
                     'new_hull': np.array([]),
+                    'final_hull': original_hull_points,
                     'selected_points': selected_points,
+                    'combined_points': original_hull_points,
                     'all_points': above_diagonal,
                     'original_hull_area': original_hull_area,
-                    'new_hull_area': 0
+                    'new_hull_area': 0,
+                    'final_hull_area': original_hull_area,
+                    'original_auc': original_metrics['auc'],
+                    'final_auc': original_metrics['auc']
                 }
-            return np.array([])
+            return original_hull_points
         
-        # Calculate new hull with selected points
+        # Calculate new hull with selected points only (for comparison)
         new_extended_points = np.vstack([[0, 0], selected_points, [1, 1]])
         new_hull = ConvexHull(new_extended_points)
         new_hull_area = new_hull.volume
@@ -1204,16 +1407,32 @@ def select_points_above_diagonal(points, distance_percentage=1.0, return_details
                            if 1 <= i <= len(selected_points)]
         new_hull_points = selected_points[new_hull_indices]
         
+        # MODIFICATION: Combine original hull points with selected points
+        combined_points = np.vstack([original_hull_points, selected_points])
+        
+        # Calculate final hull from combined points
+        final_extended_points = np.vstack([[0, 0], combined_points, [1, 1]])
+        final_hull = ConvexHull(final_extended_points)
+        final_hull_area = final_hull.volume
+        
+        # Get final hull points (excluding anchors)
+        final_hull_indices = [i - 1 for i in final_hull.vertices 
+                             if 1 <= i <= len(combined_points)]
+        final_hull_points = combined_points[final_hull_indices]
+        
         if return_details:
             # Calculate ROC metrics
             original_metrics = calculate_roc_metrics(original_hull_points)
             new_metrics = calculate_roc_metrics(new_hull_points)
+            final_metrics = calculate_roc_metrics(final_hull_points)
             all_metrics = calculate_roc_metrics(above_diagonal)
             
             return {
                 'original_hull': original_hull_points,
                 'new_hull': new_hull_points,
+                'final_hull': final_hull_points,
                 'selected_points': selected_points,
+                'combined_points': combined_points,
                 'all_points': above_diagonal,
                 'selection_criterion': f'above_diagonal_{distance_percentage}pct_threshold',
                 'n_selected': n_select,
@@ -1222,8 +1441,9 @@ def select_points_above_diagonal(points, distance_percentage=1.0, return_details
                 'distance_percentage': distance_percentage,
                 'original_hull_area': original_hull_area,
                 'new_hull_area': new_hull_area,
-                'hull_area_reduction': original_hull_area - new_hull_area,
-                'reduction_percentage': ((original_hull_area - new_hull_area) / original_hull_area * 100) 
+                'final_hull_area': final_hull_area,
+                'hull_area_reduction': original_hull_area - final_hull_area,
+                'reduction_percentage': ((original_hull_area - final_hull_area) / original_hull_area * 100) 
                                        if original_hull_area > 0 else 0,
                 # Original hull metrics
                 'original_auc': original_metrics['auc'],
@@ -1232,29 +1452,37 @@ def select_points_above_diagonal(points, distance_percentage=1.0, return_details
                 'original_best_fpr': original_metrics['best_fpr'],
                 'original_avg_quality': original_metrics['avg_quality'],
                 'original_max_quality': original_metrics['max_quality'],
-                # New hull metrics
+                # New hull metrics (from selected points only)
                 'new_auc': new_metrics['auc'],
                 'new_num_subgroups': new_metrics['num_points'],
                 'new_best_tpr': new_metrics['best_tpr'],
                 'new_best_fpr': new_metrics['best_fpr'],
                 'new_avg_quality': new_metrics['avg_quality'],
                 'new_max_quality': new_metrics['max_quality'],
+                # Final combined hull metrics
+                'final_auc': final_metrics['auc'],
+                'final_num_subgroups': final_metrics['num_points'],
+                'final_best_tpr': final_metrics['best_tpr'],
+                'final_best_fpr': final_metrics['best_fpr'],
+                'final_avg_quality': final_metrics['avg_quality'],
+                'final_max_quality': final_metrics['max_quality'],
                 # All points metrics
                 'all_points_auc': all_metrics['auc'],
                 'all_points_num': all_metrics['num_points'],
                 'all_points_max_quality': all_metrics['max_quality'],
                 # Comparison metrics
-                'auc_reduction': original_metrics['auc'] - new_metrics['auc'],
-                'auc_reduction_percentage': ((original_metrics['auc'] - new_metrics['auc']) / original_metrics['auc'] * 100)
+                'auc_reduction': original_metrics['auc'] - final_metrics['auc'],
+                'auc_reduction_percentage': ((original_metrics['auc'] - final_metrics['auc']) / original_metrics['auc'] * 100)
                                            if original_metrics['auc'] > 0 else 0,
-                'quality_reduction': original_metrics['max_quality'] - new_metrics['max_quality'],
+                'quality_reduction': original_metrics['max_quality'] - final_metrics['max_quality'],
                 # Diagonal distance metrics
                 'avg_diagonal_distance': np.mean(diagonal_distances[selected_indices]),
                 'max_diagonal_distance_selected': np.max(diagonal_distances[selected_indices]),
                 'min_diagonal_distance_selected': np.min(diagonal_distances[selected_indices])
             }
         
-        return new_hull_points
+        # CHANGED: Return combined_points (all hull + selected) instead of just final_hull_points
+        return combined_points
         
     except Exception as e:
         print(f"Error in above diagonal selection: {e}")
@@ -1499,7 +1727,7 @@ def adaptive_roc_pruning(subgroups, alpha=None, quality_threshold=None):
     
     return kept_subgroups
 
-def generate_candidates(data, target_col, current_subgroups, depth, min_coverage=10):
+def generate_candidates(data, target_col, current_subgroups, depth, min_coverage=10, max_candidates=10000):
     """
     Generate candidate subgroups by extending current subgroups.
     
@@ -1509,6 +1737,7 @@ def generate_candidates(data, target_col, current_subgroups, depth, min_coverage
         current_subgroups: List of current subgroup statistics
         depth: Current search depth
         min_coverage: Minimum coverage for candidates
+        max_candidates: Maximum number of candidates to generate (prevents explosion)
     
     Returns:
         List of candidate subgroup statistics
@@ -1527,13 +1756,26 @@ def generate_candidates(data, target_col, current_subgroups, depth, min_coverage
         categorical_cols.remove(target_col)
     
     # Limit categorical columns to those with reasonable number of unique values
+    # Try removing this one to see what happens
     categorical_cols = [col for col in categorical_cols 
                        if data[col].nunique() <= 20]  # Avoid explosion
     
     all_cols = numeric_cols + categorical_cols
     
+    # If we have too many subgroups, sample/prune them first to avoid explosion
+    working_subgroups = current_subgroups
+    if len(current_subgroups) > 100:
+        # Keep top 100 by quality to limit candidate generation
+        working_subgroups = sorted(current_subgroups, key=lambda x: x.get('roc_quality', 0), reverse=True)[:100]
+        print(f"  Pruning from {len(current_subgroups)} to {len(working_subgroups)} subgroups before candidate generation")
+    
     # Generate candidates from current subgroups
-    for sg in current_subgroups:
+    for sg in working_subgroups:
+        # Check if we've hit the max candidates limit
+        if len(candidates) >= max_candidates:
+            print(f"  Reached max_candidates limit ({max_candidates}), stopping candidate generation")
+            break
+            
         conditions = sg['conditions']
         
         if len(conditions) >= depth:
@@ -1577,6 +1819,13 @@ def generate_candidates(data, target_col, current_subgroups, depth, min_coverage
                             'tpr' in candidate_stats and 'fpr' in candidate_stats):
                             subgroups.append([candidate_stats.get('fpr').tolist(), candidate_stats.get('tpr').tolist()])
                             candidates.append(candidate_stats)
+                        
+                        # Check if we've hit the limit
+                        if len(candidates) >= max_candidates:
+                            break
+                    
+                    if len(candidates) >= max_candidates:
+                        break
             
             # Handle categorical columns
             elif col in categorical_cols:
@@ -1603,6 +1852,21 @@ def generate_candidates(data, target_col, current_subgroups, depth, min_coverage
                             'tpr' in candidate_stats and 'fpr' in candidate_stats):
                             subgroups.append([candidate_stats.get('fpr').tolist(), candidate_stats.get('tpr').tolist()])
                             candidates.append(candidate_stats)
+                        
+                        # Check if we've hit the limit
+                        if len(candidates) >= max_candidates:
+                            break
+                    
+                    if len(candidates) >= max_candidates:
+                        break
+            
+            if len(candidates) >= max_candidates:
+                break
+
+    # If we still have too many candidates, prune to best quality
+    if len(candidates) > max_candidates:
+        print(f"  Pruning candidates from {len(candidates)} to {max_candidates} by quality")
+        candidates = sorted(candidates, key=lambda x: x.get('roc_quality', 0), reverse=True)[:max_candidates]
 
     subgroups = np.array(subgroups)
     print(subgroups)
@@ -1617,9 +1881,9 @@ def generate_candidates(data, target_col, current_subgroups, depth, min_coverage
     # Compute convex hull
     hull = ConvexHull(hull_points)
     hull_points_indices = hull.vertices
-    print(hull_points_indices)
+    # print(hull_points_indices)
     points_on_hull = hull_points[hull_points_indices]
-    print(points_on_hull)
+    # print(points_on_hull)
 
     # Plot
     plt.figure(figsize=(8, 6))
@@ -1648,7 +1912,7 @@ def generate_candidates(data, target_col, current_subgroups, depth, min_coverage
     
     return candidates, hull_comparison
 
-def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50):
+def true_roc_search(data, target_col, alphas=None, max_depth=4, min_coverage=50):
     """
     Implement true ROC search with adaptive width calculation.
     
@@ -1690,8 +1954,10 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
         candidates_explored = 0
         depth_analysis = []  # Track statistics for each depth
         hull_comparisons = []  # Track hull comparisons for each depth
+        depth_1_subgroups = None  # Store depth 1 subgroups for start_from_pure_roc feature
         
         # Add depth 0 (population) to analysis
+        depth_0_auc = calculate_roc_metrics([(population_stats['fpr'], population_stats['tpr'])])['auc']
         depth_analysis.append({
             'depth': 0,
             'subgroups_start': 1,
@@ -1700,7 +1966,8 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
             'width': 1,
             'best_quality': population_stats['roc_quality'],
             'avg_coverage': population_stats['coverage'],
-            'cumulative_candidates': 0
+            'cumulative_candidates': 0,
+            'depth_auc': depth_0_auc
         })
         
         for depth in range(1, max_depth + 1):
@@ -1708,7 +1975,7 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
             depth_start_subgroups = len(current_subgroups)
             
             # Generate candidates and get hull comparison data
-            candidates, hull_comparison = generate_candidates(data, target_col, current_subgroups, depth, min_coverage)
+            candidates, hull_comparison = generate_candidates(data, target_col, current_subgroups, depth, min_coverage, max_candidates=10000)
             candidates_explored += len(candidates)
             depth_candidates = len(candidates)
             
@@ -1737,6 +2004,11 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
             if not candidates:
                 print(f"No valid candidates at depth {depth}")
                 # Still record this depth with no progress
+                if current_subgroups:
+                    depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
+                    depth_auc = calculate_roc_metrics(depth_points)['auc']
+                else:
+                    depth_auc = 0.0
                 depth_analysis.append({
                     'depth': depth,
                     'subgroups_start': depth_start_subgroups,
@@ -1744,7 +2016,8 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
                     'subgroups_after_pruning': depth_start_subgroups,
                     'best_quality': max([sg.get('roc_quality', 0) for sg in current_subgroups]) if current_subgroups else 0,
                     'avg_coverage': np.mean([sg['coverage'] for sg in current_subgroups]) if current_subgroups else 0,
-                    'cumulative_candidates': candidates_explored
+                    'cumulative_candidates': candidates_explored,
+                    'depth_auc': depth_auc
                 })
                 break
             
@@ -1756,6 +2029,10 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
             # Apply adaptive ROC pruning
             current_subgroups = adaptive_roc_pruning(all_candidates, alpha)
             
+            # Store depth 1 subgroups for start_from_pure_roc feature
+            if depth == 1 and alpha is None:  # Only for Pure ROC search
+                depth_1_subgroups = current_subgroups.copy()
+            
             # Keep track of all subgroups found
             all_subgroups.extend(candidates)
             
@@ -1763,9 +2040,13 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
             if current_subgroups:
                 best_quality = max([sg.get('roc_quality', 0) for sg in current_subgroups])
                 avg_coverage = np.mean([sg['coverage'] for sg in current_subgroups])
+                # Calculate AUC at this depth
+                depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
+                depth_auc = calculate_roc_metrics(depth_points)['auc']
             else:
                 best_quality = 0
                 avg_coverage = 0
+                depth_auc = 0.0
             
             depth_analysis.append({
                 'depth': depth,
@@ -1775,7 +2056,8 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
                 'width': len(current_subgroups),
                 'best_quality': best_quality,
                 'avg_coverage': avg_coverage,
-                'cumulative_candidates': candidates_explored
+                'cumulative_candidates': candidates_explored,
+                'depth_auc': depth_auc
             })
             
             if not current_subgroups:
@@ -1823,7 +2105,8 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
             'best_coverage': best_sg['coverage'],
             'subgroups': final_subgroups,
             'depth_analysis': depth_analysis,
-            'hull_comparisons': hull_comparisons
+            'hull_comparisons': hull_comparisons,
+            'depth_1_subgroups': depth_1_subgroups  # Add this for start_from_pure_roc feature
         }
         
         print(f"Completed {mode_name}:")
@@ -1835,8 +2118,8 @@ def true_roc_search(data, target_col, alphas=None, max_depth=3, min_coverage=50)
     
     return results
 
-
-def hull_removal_search(data, target_col, max_depth=3, min_coverage=50):
+# Modify this one
+def hull_removal_search(data, target_col, max_depth=3, min_coverage=50, start_from_pure_roc=None):
     """
     ROC search using hull removal strategy: at each depth, remove hull points
     and recalculate with remaining points.
@@ -1846,6 +2129,7 @@ def hull_removal_search(data, target_col, max_depth=3, min_coverage=50):
         target_col: Name of target column
         max_depth: Maximum search depth
         min_coverage: Minimum coverage for subgroups
+        start_from_pure_roc: List of subgroup stats from Pure ROC depth 1 to start from
     
     Returns:
         Dictionary with search results
@@ -1853,42 +2137,75 @@ def hull_removal_search(data, target_col, max_depth=3, min_coverage=50):
     print("\n=== Hull Removal Search ===")
     start_time = time.time()
     
-    # Initialize with population
-    population_stats = calculate_subgroup_stats(data, [], target_col)
-    if not population_stats or 'tpr' not in population_stats:
-        print("Error: Could not calculate population statistics")
-        return None
-    
-    population_stats['roc_quality'] = roc_quality_measure(population_stats['tpr'], population_stats['fpr'], None)
-    
-    current_subgroups = [population_stats]
-    all_subgroups = [population_stats]
+    # Initialize with population or Pure ROC depth 1 subgroups
+    using_pure_roc_start = False
+    if start_from_pure_roc and len(start_from_pure_roc) > 0:
+        current_subgroups = start_from_pure_roc
+        all_subgroups = start_from_pure_roc.copy()
+        start_depth = 2
+        using_pure_roc_start = True
+        # Add 1 to max_depth to compensate for starting at depth 2
+        effective_max_depth = max_depth + 1
+        print(f"Starting from Pure ROC depth 1 result with {len(start_from_pure_roc)} subgroups")
+    else:
+        population_stats = calculate_subgroup_stats(data, [], target_col)
+        if not population_stats or 'tpr' not in population_stats:
+            print("Error: Could not calculate population statistics")
+            return None
+        
+        population_stats['roc_quality'] = roc_quality_measure(population_stats['tpr'], population_stats['fpr'], None)
+        
+        current_subgroups = [population_stats]
+        all_subgroups = [population_stats]
+        start_depth = 1
+        effective_max_depth = max_depth
     
     candidates_explored = 0
     depth_analysis = []
     hull_comparisons = []
     
     # Add depth 0
-    depth_analysis.append({
-        'depth': 0,
-        'subgroups_start': 1,
-        'candidates_generated': 0,
-        'subgroups_after_pruning': 1,
-        'width': 1,
-        'best_quality': population_stats['roc_quality'],
-        'avg_coverage': population_stats['coverage'],
-        'cumulative_candidates': 0
-    })
+    if using_pure_roc_start:
+        # When starting from Pure ROC, depth 0 = Pure ROC's depth 1 result
+        depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
+        depth_0_auc = calculate_roc_metrics(depth_points)['auc']
+        depth_analysis.append({
+            'depth': 0,
+            'subgroups_start': len(current_subgroups),
+            'candidates_generated': 0,
+            'subgroups_after_pruning': len(current_subgroups),
+            'width': len(current_subgroups),
+            'best_quality': max([sg['roc_quality'] for sg in current_subgroups]),
+            'avg_coverage': np.mean([sg['coverage'] for sg in current_subgroups]),
+            'cumulative_candidates': 0,
+            'depth_auc': depth_0_auc
+        })
+    else:
+        population_stats = current_subgroups[0]
+        depth_0_auc = calculate_roc_metrics([(population_stats['fpr'], population_stats['tpr'])])['auc']
+        depth_analysis.append({
+            'depth': 0,
+            'subgroups_start': 1,
+            'candidates_generated': 0,
+            'subgroups_after_pruning': 1,
+            'width': 1,
+            'best_quality': population_stats['roc_quality'],
+            'avg_coverage': population_stats['coverage'],
+            'cumulative_candidates': 0,
+            'depth_auc': depth_0_auc
+        })
     
-    for depth in range(1, max_depth + 1):
-        print(f"\n--- Depth {depth} ---")
+    for depth in range(start_depth, effective_max_depth + 1):
+        # When using Pure ROC start, map depth 2->1, 3->2, 4->3, 5->4
+        output_depth = depth - 1 if using_pure_roc_start else depth
+        print(f"\n--- Depth {output_depth} ---")
         
         # Generate candidates
-        candidates, hull_comp = generate_candidates(data, target_col, current_subgroups, depth, min_coverage)
+        candidates, hull_comp = generate_candidates(data, target_col, current_subgroups, depth, min_coverage, max_candidates=10000)
         candidates_explored += len(candidates)
         
         if not candidates:
-            print(f"No candidates at depth {depth}")
+            print(f"No candidates at depth {output_depth}")
             break
         
         print(f"Generated {len(candidates)} candidates")
@@ -1903,46 +2220,99 @@ def hull_removal_search(data, target_col, max_depth=3, min_coverage=50):
         
         all_subgroups.extend(candidate_subgroups)
         
-        # Apply hull removal pruning
-        roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in candidate_subgroups])
-        
-        if len(roc_points) >= 3:
-            hull_data = remove_hull_points_and_recalculate(roc_points, return_details=True)
-            hull_data['depth'] = depth
-            hull_comparisons.append(hull_data)
+        # Special handling when using Pure ROC start at depth 2 (output depth 1)
+        if using_pure_roc_start and depth == 2:
+            print(f"Pure ROC start: selecting from {len(candidate_subgroups)} new candidates to combine with {len(current_subgroups)} Pure ROC subgroups")
             
-            # Keep only remaining points (non-hull points) for next iteration
-            remaining_points = hull_data.get('remaining_points', np.array([]))
+            # Calculate Pure ROC's convex hull
+            pure_roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in current_subgroups])
             
-            if len(remaining_points) > 0:
-                # Find subgroups corresponding to remaining points (optimized)
-                kept_subgroups = []
-                remaining_set = set(map(tuple, remaining_points))  # Convert to set of tuples for O(1) lookup
+            # Select from candidates using hull removal on candidates only
+            candidate_points = np.array([(sg['fpr'], sg['tpr']) for sg in candidate_subgroups])
+            
+            if len(candidate_points) >= 3:
+                hull_data = remove_hull_points_and_recalculate(candidate_points, return_details=True)
+                hull_data['depth'] = output_depth
+                hull_comparisons.append(hull_data)
                 
-                for sg in candidate_subgroups:
-                    sg_point = (round(sg['fpr'], 6), round(sg['tpr'], 6))  # Round to 6 decimals
-                    if sg_point in remaining_set:
-                        kept_subgroups.append(sg)
+                # Get combined_points from hull removal on candidates
+                combined_points = hull_data.get('combined_points', np.array([]))
                 
-                current_subgroups = kept_subgroups if kept_subgroups else candidate_subgroups[:10]
+                if len(combined_points) > 0:
+                    # Find candidate subgroups corresponding to combined points
+                    selected_candidates = []
+                    combined_set = set(map(lambda pt: (round(pt[0], 6), round(pt[1], 6)), combined_points))
+                    
+                    for sg in candidate_subgroups:
+                        sg_point = (round(sg['fpr'], 6), round(sg['tpr'], 6))
+                        if sg_point in combined_set:
+                            selected_candidates.append(sg)
+                    
+                    # Combine Pure ROC + selected candidates
+                    current_subgroups = current_subgroups + selected_candidates
+                    print(f"Pure ROC start: {len(pure_roc_points)} Pure ROC + {len(selected_candidates)} selected = {len(current_subgroups)} total")
+                else:
+                    # If no points from hull removal, just take top candidates
+                    top_candidates = sorted(candidate_subgroups, key=lambda x: x['roc_quality'], reverse=True)[:10]
+                    current_subgroups = current_subgroups + top_candidates
+                    print(f"Pure ROC start: {len(pure_roc_points)} Pure ROC + {len(top_candidates)} selected = {len(current_subgroups)} total")
             else:
-                current_subgroups = candidate_subgroups[:10]
+                # Not enough candidates for hull, just take them all
+                current_subgroups = current_subgroups + candidate_subgroups
+                print(f"Pure ROC start: {len(pure_roc_points)} Pure ROC + {len(candidate_subgroups)} selected = {len(current_subgroups)} total")
         else:
-            current_subgroups = candidate_subgroups
+            # Normal processing: combine previous depth's subgroups with new candidates before selection
+            combined_subgroups = current_subgroups + candidate_subgroups
+            
+            # Apply hull removal pruning - MODIFIED: Keep hull points instead of removing them
+            roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in combined_subgroups])
+            
+            if len(roc_points) >= 3:
+                hull_data = remove_hull_points_and_recalculate(roc_points, return_details=True)
+                hull_data['depth'] = output_depth
+                hull_comparisons.append(hull_data)
+                
+                # Get combined_points which includes hull + new hull from remaining
+                combined_points = hull_data.get('combined_points', np.array([]))
+                
+                if len(combined_points) > 0:
+                    # Find subgroups corresponding to combined points
+                    kept_subgroups = []
+                    combined_set = set(map(lambda pt: (round(pt[0], 6), round(pt[1], 6)), combined_points))
+                    
+                    # FIXED: Search in combined_subgroups to find matching points
+                    for sg in combined_subgroups:
+                        sg_point = (round(sg['fpr'], 6), round(sg['tpr'], 6))
+                        if sg_point in combined_set:
+                            kept_subgroups.append(sg)
+                    
+                    current_subgroups = kept_subgroups if kept_subgroups else combined_subgroups[:10]
+                else:
+                    current_subgroups = combined_subgroups[:10]
+            else:
+                current_subgroups = combined_subgroups
         
         width = len(current_subgroups)
         best_quality = max([sg['roc_quality'] for sg in current_subgroups]) if current_subgroups else 0
         avg_coverage = np.mean([sg['coverage'] for sg in current_subgroups]) if current_subgroups else 0
         
+        # Calculate AUC at this depth
+        if current_subgroups:
+            depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
+            depth_auc = calculate_roc_metrics(depth_points)['auc']
+        else:
+            depth_auc = 0.0
+        
         depth_analysis.append({
-            'depth': depth,
+            'depth': output_depth,
             'subgroups_start': len(candidate_subgroups),
             'candidates_generated': len(candidates),
             'subgroups_after_pruning': len(current_subgroups),
             'width': width,
             'best_quality': best_quality,
             'avg_coverage': avg_coverage,
-            'cumulative_candidates': candidates_explored
+            'cumulative_candidates': candidates_explored,
+            'depth_auc': depth_auc
         })
         
         print(f"After hull removal: {len(candidate_subgroups)} -> {width} subgroups")
@@ -1950,16 +2320,23 @@ def hull_removal_search(data, target_col, max_depth=3, min_coverage=50):
     # Calculate final results
     elapsed_time = time.time() - start_time
     
-    if all_subgroups:
-        roc_points = [(sg['fpr'], sg['tpr']) for sg in all_subgroups]
+    if current_subgroups:
+        # Use current_subgroups with optional pruning if too many
+        max_width = 50
+        if len(current_subgroups) > max_width:
+            final_subgroups = adaptive_roc_pruning(current_subgroups, None)[:max_width]
+        else:
+            final_subgroups = current_subgroups
+        
+        roc_points = [(sg['fpr'], sg['tpr']) for sg in final_subgroups]
         roc_metrics = calculate_roc_metrics(roc_points)
-        best_sg = max(all_subgroups, key=lambda x: x['roc_quality'])
+        best_sg = max(final_subgroups, key=lambda x: x['roc_quality'])
         
         result = {
             'algorithm': 'Hull Removal',
-            'adaptive_width': len(current_subgroups),
+            'adaptive_width': len(final_subgroups),
             'total_candidates': candidates_explored,
-            'final_subgroups': len(all_subgroups),
+            'final_subgroups': len(final_subgroups),
             'search_time': elapsed_time,
             'auc_approx': roc_metrics['auc'],
             'best_quality': best_sg['roc_quality'],
@@ -1967,7 +2344,7 @@ def hull_removal_search(data, target_col, max_depth=3, min_coverage=50):
             'best_fpr': best_sg['fpr'],
             'best_precision': best_sg['precision'],
             'best_coverage': best_sg['coverage'],
-            'subgroups': all_subgroups,
+            'subgroups': final_subgroups,
             'depth_analysis': depth_analysis,
             'hull_comparisons': hull_comparisons
         }
@@ -1984,7 +2361,7 @@ def hull_removal_search(data, target_col, max_depth=3, min_coverage=50):
     return None
 
 
-def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_coverage=50):
+def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_coverage=50, start_from_pure_roc=None):
     """
     ROC search using closest-to-hull strategy: at each depth, keep n points
     closest to the convex hull.
@@ -1995,11 +2372,14 @@ def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_cover
         n_points: Number of closest points to keep
         max_depth: Maximum search depth
         min_coverage: Minimum coverage for subgroups
+        start_from_pure_roc: If provided, use Pure ROC result at depth 1 as starting point
     
     Returns:
         Dictionary with search results
     """
     print(f"\n=== Closest to Hull Search (n={n_points}) ===")
+    if start_from_pure_roc:
+        print(f"Starting from Pure ROC result at depth 1 (width: {len(start_from_pure_roc)})")
     start_time = time.time()
     
     # Initialize with population
@@ -2010,7 +2390,21 @@ def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_cover
     
     population_stats['roc_quality'] = roc_quality_measure(population_stats['tpr'], population_stats['fpr'], None)
     
-    current_subgroups = [population_stats]
+    # If starting from Pure ROC, use those subgroups at depth 1; otherwise start with population
+    if start_from_pure_roc and len(start_from_pure_roc) > 0:
+        current_subgroups = start_from_pure_roc
+        # Pure ROC depth 1 subgroups already have 1 condition each
+        # So we start generating at depth 2, but still show depth 1 in results
+        start_depth = 2
+        # Flag to indicate we're using Pure ROC start
+        using_pure_roc_start = True
+        # Add 1 to max_depth to compensate for starting at depth 2
+        effective_max_depth = max_depth + 1
+    else:
+        current_subgroups = [population_stats]
+        start_depth = 1
+        using_pure_roc_start = False
+        effective_max_depth = max_depth
     all_subgroups = [population_stats]
     
     candidates_explored = 0
@@ -2018,22 +2412,42 @@ def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_cover
     hull_comparisons = []
     
     # Add depth 0
-    depth_analysis.append({
-        'depth': 0,
-        'subgroups_start': 1,
-        'candidates_generated': 0,
-        'subgroups_after_pruning': 1,
-        'width': 1,
-        'best_quality': population_stats['roc_quality'],
-        'avg_coverage': population_stats['coverage'],
-        'cumulative_candidates': 0
-    })
+    if using_pure_roc_start:
+        # When starting from Pure ROC, depth 0 = Pure ROC's depth 1 result
+        depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
+        depth_0_auc = calculate_roc_metrics(depth_points)['auc']
+        depth_analysis.append({
+            'depth': 0,
+            'subgroups_start': len(current_subgroups),
+            'candidates_generated': 0,
+            'subgroups_after_pruning': len(current_subgroups),
+            'width': len(current_subgroups),
+            'best_quality': max([sg['roc_quality'] for sg in current_subgroups]),
+            'avg_coverage': np.mean([sg['coverage'] for sg in current_subgroups]),
+            'cumulative_candidates': 0,
+            'depth_auc': depth_0_auc
+        })
+    else:
+        depth_0_auc = calculate_roc_metrics([(population_stats['fpr'], population_stats['tpr'])])['auc']
+        depth_analysis.append({
+            'depth': 0,
+            'subgroups_start': 1,
+            'candidates_generated': 0,
+            'subgroups_after_pruning': 1,
+            'width': 1,
+            'best_quality': population_stats['roc_quality'],
+            'avg_coverage': population_stats['coverage'],
+            'cumulative_candidates': 0,
+            'depth_auc': depth_0_auc
+        })
     
-    for depth in range(1, max_depth + 1):
-        print(f"\n--- Depth {depth} ---")
+    for depth in range(start_depth, effective_max_depth + 1):
+        # When using Pure ROC start, map depth 2->1, 3->2, 4->3, 5->4
+        output_depth = depth - 1 if using_pure_roc_start else depth
+        print(f"\n--- Depth {output_depth} ---")
         
         # Generate candidates
-        candidates, hull_comp = generate_candidates(data, target_col, current_subgroups, depth, min_coverage)
+        candidates, hull_comp = generate_candidates(data, target_col, current_subgroups, depth, min_coverage, max_candidates=10000)
         candidates_explored += len(candidates)
         
         if not candidates:
@@ -2052,46 +2466,98 @@ def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_cover
         
         all_subgroups.extend(candidate_subgroups)
         
-        # Apply closest-to-hull pruning
-        roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in candidate_subgroups])
-        
-        if len(roc_points) >= 3:
-            hull_data = select_closest_points_to_hull(roc_points, n_points, return_details=True, exclude_hull_points=True)
-            hull_data['depth'] = depth
-            hull_comparisons.append(hull_data)
+        # Special handling for Pure ROC start at first iteration (depth=2, output_depth=1)
+        # We want to select n_points from NEW candidates and ADD them to Pure ROC's subgroups
+        if using_pure_roc_start and depth == 2:
+            # Get Pure ROC hull points for distance calculation
+            pure_roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in current_subgroups])
+            # Get candidate points
+            candidate_points = np.array([(sg['fpr'], sg['tpr']) for sg in candidate_subgroups])
             
-            new_hull_points = hull_data.get('new_hull', np.array([]))
-            
-            if len(new_hull_points) > 0:
-                # Find subgroups corresponding to selected points (optimized)
-                kept_subgroups = []
-                selected_points = hull_data.get('selected_points', new_hull_points)
-                selected_set = set(map(lambda pt: (round(pt[0], 6), round(pt[1], 6)), selected_points))
-                
-                for sg in candidate_subgroups:
-                    sg_point = (round(sg['fpr'], 6), round(sg['tpr'], 6))
-                    if sg_point in selected_set:
-                        kept_subgroups.append(sg)
-                
-                current_subgroups = kept_subgroups if kept_subgroups else candidate_subgroups[:n_points]
+            if len(pure_roc_points) >= 3 and len(candidate_points) > 0:
+                # Calculate Pure ROC's convex hull
+                above_diag_pure = pure_roc_points[pure_roc_points[:, 1] > pure_roc_points[:, 0]]
+                if len(above_diag_pure) >= 3:
+                    extended = np.vstack([[0, 0], above_diag_pure, [1, 1]])
+                    pure_hull = ConvexHull(extended)
+                    pure_hull_indices = [i - 1 for i in pure_hull.vertices if 1 <= i <= len(above_diag_pure)]
+                    pure_hull_points = above_diag_pure[pure_hull_indices]
+                    
+                    # Calculate distance from each candidate to Pure ROC hull
+                    from scipy.spatial import KDTree
+                    hull_tree = KDTree(pure_hull_points)
+                    distances, _ = hull_tree.query(candidate_points)
+                    
+                    # Select n_points closest candidates
+                    n_select = min(n_points, len(candidate_points))
+                    closest_indices = np.argsort(distances)[:n_select]
+                    
+                    # Get the selected candidate subgroups
+                    selected_subgroups = [candidate_subgroups[i] for i in closest_indices]
+                    
+                    # Combine Pure ROC subgroups + selected from candidates
+                    current_subgroups = current_subgroups + selected_subgroups
+                    print(f"Pure ROC start: {len(pure_roc_points)} Pure ROC + {len(selected_subgroups)} selected = {len(current_subgroups)} total")
+                else:
+                    # Fallback: just take first n candidates
+                    current_subgroups = current_subgroups + candidate_subgroups[:n_points]
             else:
-                current_subgroups = candidate_subgroups[:n_points]
+                current_subgroups = current_subgroups + candidate_subgroups[:n_points]
         else:
-            current_subgroups = candidate_subgroups[:n_points]
+            # Normal processing: combine first, then select
+            # FIXED: Combine previous depth's subgroups with new candidates before selection
+            combined_subgroups = current_subgroups + candidate_subgroups
+            
+            # Apply closest-to-hull pruning on combined set
+            roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in combined_subgroups])
+            
+            if len(roc_points) >= 3:
+                hull_data = select_closest_points_to_hull(roc_points, n_points, return_details=True, exclude_hull_points=True)
+                hull_data['depth'] = output_depth
+                hull_comparisons.append(hull_data)
+                
+                new_hull_points = hull_data.get('new_hull', np.array([]))
+                
+                if len(new_hull_points) > 0:
+                    # Find subgroups corresponding to combined_points from hull_data
+                    kept_subgroups = []
+                    # Get the combined_points which includes hull + selected
+                    combined_points = hull_data.get('combined_points', new_hull_points)
+                    combined_set = set(map(lambda pt: (round(pt[0], 6), round(pt[1], 6)), combined_points))
+                    
+                    # FIXED: Search in combined_subgroups to find matching points
+                    for sg in combined_subgroups:
+                        sg_point = (round(sg['fpr'], 6), round(sg['tpr'], 6))
+                        if sg_point in combined_set:
+                            kept_subgroups.append(sg)
+                    
+                    current_subgroups = kept_subgroups if kept_subgroups else combined_subgroups[:n_points]
+                else:
+                    current_subgroups = combined_subgroups[:n_points]
+            else:
+                current_subgroups = combined_subgroups[:n_points]
         
         width = len(current_subgroups)
         best_quality = max([sg['roc_quality'] for sg in current_subgroups]) if current_subgroups else 0
         avg_coverage = np.mean([sg['coverage'] for sg in current_subgroups]) if current_subgroups else 0
         
+        # Calculate AUC at this depth
+        if current_subgroups:
+            depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
+            depth_auc = calculate_roc_metrics(depth_points)['auc']
+        else:
+            depth_auc = 0.0
+        
         depth_analysis.append({
-            'depth': depth,
+            'depth': output_depth,  # Use output_depth for Pure ROC start compatibility
             'subgroups_start': len(candidate_subgroups),
             'candidates_generated': len(candidates),
             'subgroups_after_pruning': len(current_subgroups),
             'width': width,
             'best_quality': best_quality,
             'avg_coverage': avg_coverage,
-            'cumulative_candidates': candidates_explored
+            'cumulative_candidates': candidates_explored,
+            'depth_auc': depth_auc
         })
         
         print(f"After closest-to-hull selection: {len(candidate_subgroups)} -> {width} subgroups")
@@ -2099,16 +2565,23 @@ def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_cover
     # Calculate final results
     elapsed_time = time.time() - start_time
     
-    if all_subgroups:
-        roc_points = [(sg['fpr'], sg['tpr']) for sg in all_subgroups]
+    if current_subgroups:
+        # Use current_subgroups with optional pruning if too many
+        max_width = 50
+        if len(current_subgroups) > max_width:
+            final_subgroups = adaptive_roc_pruning(current_subgroups, None)[:max_width]
+        else:
+            final_subgroups = current_subgroups
+        
+        roc_points = [(sg['fpr'], sg['tpr']) for sg in final_subgroups]
         roc_metrics = calculate_roc_metrics(roc_points)
-        best_sg = max(all_subgroups, key=lambda x: x['roc_quality'])
+        best_sg = max(final_subgroups, key=lambda x: x['roc_quality'])
         
         result = {
             'algorithm': f'Closest to Hull (n={n_points})',
-            'adaptive_width': len(current_subgroups),
+            'adaptive_width': len(final_subgroups),
             'total_candidates': candidates_explored,
-            'final_subgroups': len(all_subgroups),
+            'final_subgroups': len(final_subgroups),
             'search_time': elapsed_time,
             'auc_approx': roc_metrics['auc'],
             'best_quality': best_sg['roc_quality'],
@@ -2116,7 +2589,7 @@ def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_cover
             'best_fpr': best_sg['fpr'],
             'best_precision': best_sg['precision'],
             'best_coverage': best_sg['coverage'],
-            'subgroups': all_subgroups,
+            'subgroups': final_subgroups,
             'depth_analysis': depth_analysis,
             'hull_comparisons': hull_comparisons
         }
@@ -2133,7 +2606,7 @@ def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_cover
     return None
 
 
-def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, min_coverage=50):
+def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, min_coverage=50, start_from_pure_roc=None):
     """
     ROC search using furthest-from-diagonal strategy: at each depth, keep n points
     furthest from the diagonal (highest TPR - FPR).
@@ -2144,11 +2617,14 @@ def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, mi
         n_points: Number of furthest points to keep
         max_depth: Maximum search depth
         min_coverage: Minimum coverage for subgroups
+        start_from_pure_roc: If provided, use Pure ROC result at depth 1 as starting point
     
     Returns:
         Dictionary with search results
     """
     print(f"\n=== Furthest from Diagonal Search (n={n_points}) ===")
+    if start_from_pure_roc:
+        print(f"Starting from Pure ROC result at depth 1 (width: {len(start_from_pure_roc)})")
     start_time = time.time()
     
     # Initialize with population
@@ -2159,7 +2635,21 @@ def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, mi
     
     population_stats['roc_quality'] = roc_quality_measure(population_stats['tpr'], population_stats['fpr'], None)
     
-    current_subgroups = [population_stats]
+    # If starting from Pure ROC, use those subgroups at depth 1; otherwise start with population
+    if start_from_pure_roc and len(start_from_pure_roc) > 0:
+        current_subgroups = start_from_pure_roc
+        # Pure ROC depth 1 subgroups already have 1 condition each
+        # So we start generating at depth 2, but still show depth 1 in results
+        start_depth = 2
+        # Flag to indicate we're using Pure ROC start
+        using_pure_roc_start = True
+        # Add 1 to max_depth to compensate for starting at depth 2
+        effective_max_depth = max_depth + 1
+    else:
+        current_subgroups = [population_stats]
+        start_depth = 1
+        using_pure_roc_start = False
+        effective_max_depth = max_depth
     all_subgroups = [population_stats]
     
     candidates_explored = 0
@@ -2167,26 +2657,46 @@ def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, mi
     hull_comparisons = []
     
     # Add depth 0
-    depth_analysis.append({
-        'depth': 0,
-        'subgroups_start': 1,
-        'candidates_generated': 0,
-        'subgroups_after_pruning': 1,
-        'width': 1,
-        'best_quality': population_stats['roc_quality'],
-        'avg_coverage': population_stats['coverage'],
-        'cumulative_candidates': 0
-    })
+    if using_pure_roc_start:
+        # When starting from Pure ROC, depth 0 = Pure ROC's depth 1 result
+        depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
+        depth_0_auc = calculate_roc_metrics(depth_points)['auc']
+        depth_analysis.append({
+            'depth': 0,
+            'subgroups_start': len(current_subgroups),
+            'candidates_generated': 0,
+            'subgroups_after_pruning': len(current_subgroups),
+            'width': len(current_subgroups),
+            'best_quality': max([sg['roc_quality'] for sg in current_subgroups]),
+            'avg_coverage': np.mean([sg['coverage'] for sg in current_subgroups]),
+            'cumulative_candidates': 0,
+            'depth_auc': depth_0_auc
+        })
+    else:
+        depth_0_auc = calculate_roc_metrics([(population_stats['fpr'], population_stats['tpr'])])['auc']
+        depth_analysis.append({
+            'depth': 0,
+            'subgroups_start': 1,
+            'candidates_generated': 0,
+            'subgroups_after_pruning': 1,
+            'width': 1,
+            'best_quality': population_stats['roc_quality'],
+            'avg_coverage': population_stats['coverage'],
+            'cumulative_candidates': 0,
+            'depth_auc': depth_0_auc
+        })
     
-    for depth in range(1, max_depth + 1):
-        print(f"\n--- Depth {depth} ---")
+    for depth in range(start_depth, effective_max_depth + 1):
+        # When using Pure ROC start, map depth 2->1, 3->2, 4->3, 5->4
+        output_depth = depth - 1 if using_pure_roc_start else depth
+        print(f"\n--- Depth {output_depth} ---")
         
         # Generate candidates
-        candidates, hull_comp = generate_candidates(data, target_col, current_subgroups, depth, min_coverage)
+        candidates, hull_comp = generate_candidates(data, target_col, current_subgroups, depth, min_coverage, max_candidates=10000)
         candidates_explored += len(candidates)
         
         if not candidates:
-            print(f"No candidates at depth {depth}")
+            print(f"No candidates at depth {output_depth}")
             break
         
         print(f"Generated {len(candidates)} candidates")
@@ -2201,46 +2711,83 @@ def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, mi
         
         all_subgroups.extend(candidate_subgroups)
         
-        # Apply furthest-from-diagonal pruning
-        roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in candidate_subgroups])
-        
-        if len(roc_points) >= 3:
-            hull_data = select_furthest_points_from_diagonal(roc_points, n_points, return_details=True, exclude_hull_points=True)
-            hull_data['depth'] = depth
-            hull_comparisons.append(hull_data)
+        # Special handling for Pure ROC start at first iteration (depth=2, output_depth=1)
+        # We want to select n_points from NEW candidates and ADD them to Pure ROC's subgroups
+        if using_pure_roc_start and depth == 2:
+            # Simply select n_points with highest (TPR - FPR) from candidates
+            candidate_points = [(sg['fpr'], sg['tpr'], sg['tpr'] - sg['fpr']) for sg in candidate_subgroups]
             
-            new_hull_points = hull_data.get('new_hull', np.array([]))
-            
-            if len(new_hull_points) > 0:
-                # Find subgroups corresponding to selected points (optimized)
-                kept_subgroups = []
-                selected_points = hull_data.get('selected_points', new_hull_points)
-                selected_set = set(map(lambda pt: (round(pt[0], 6), round(pt[1], 6)), selected_points))
+            if len(candidate_points) > 0:
+                # Sort by distance from diagonal (TPR - FPR) descending
+                sorted_indices = sorted(range(len(candidate_points)), 
+                                      key=lambda i: candidate_points[i][2], 
+                                      reverse=True)
                 
-                for sg in candidate_subgroups:
-                    sg_point = (round(sg['fpr'], 6), round(sg['tpr'], 6))
-                    if sg_point in selected_set:
-                        kept_subgroups.append(sg)
+                # Select top n_points
+                n_select = min(n_points, len(candidate_subgroups))
+                selected_indices = sorted_indices[:n_select]
+                selected_subgroups = [candidate_subgroups[i] for i in selected_indices]
                 
-                current_subgroups = kept_subgroups if kept_subgroups else candidate_subgroups[:n_points]
+                # Combine Pure ROC subgroups + selected from candidates
+                current_subgroups = current_subgroups + selected_subgroups
+                print(f"Pure ROC start: {len(start_from_pure_roc)} Pure ROC + {len(selected_subgroups)} selected = {len(current_subgroups)} total")
             else:
-                current_subgroups = candidate_subgroups[:n_points]
+                current_subgroups = current_subgroups + candidate_subgroups[:n_points]
         else:
-            current_subgroups = candidate_subgroups[:n_points]
+            # Normal processing: combine first, then select
+            # FIXED: Combine previous depth's subgroups with new candidates before selection
+            combined_subgroups = current_subgroups + candidate_subgroups
+            
+            # Apply furthest-from-diagonal pruning on combined set
+            roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in combined_subgroups])
+            
+            if len(roc_points) >= 3:
+                hull_data = select_furthest_points_from_diagonal(roc_points, n_points, return_details=True, exclude_hull_points=True)
+                hull_data['depth'] = output_depth
+                hull_comparisons.append(hull_data)
+                
+                new_hull_points = hull_data.get('new_hull', np.array([]))
+                
+                if len(new_hull_points) > 0:
+                    # Find subgroups corresponding to combined_points from hull_data
+                    kept_subgroups = []
+                    # Get the combined_points which includes hull + selected
+                    combined_points = hull_data.get('combined_points', new_hull_points)
+                    combined_set = set(map(lambda pt: (round(pt[0], 6), round(pt[1], 6)), combined_points))
+                    
+                    # FIXED: Search in combined_subgroups to find matching points
+                    for sg in combined_subgroups:
+                        sg_point = (round(sg['fpr'], 6), round(sg['tpr'], 6))
+                        if sg_point in combined_set:
+                            kept_subgroups.append(sg)
+                    
+                    current_subgroups = kept_subgroups if kept_subgroups else combined_subgroups[:n_points]
+                else:
+                    current_subgroups = combined_subgroups[:n_points]
+            else:
+                current_subgroups = combined_subgroups[:n_points]
         
         width = len(current_subgroups)
         best_quality = max([sg['roc_quality'] for sg in current_subgroups]) if current_subgroups else 0
         avg_coverage = np.mean([sg['coverage'] for sg in current_subgroups]) if current_subgroups else 0
         
+        # Calculate AUC at this depth
+        if current_subgroups:
+            depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
+            depth_auc = calculate_roc_metrics(depth_points)['auc']
+        else:
+            depth_auc = 0.0
+        
         depth_analysis.append({
-            'depth': depth,
+            'depth': output_depth,  # Use output_depth for Pure ROC start compatibility
             'subgroups_start': len(candidate_subgroups),
             'candidates_generated': len(candidates),
             'subgroups_after_pruning': len(current_subgroups),
             'width': width,
             'best_quality': best_quality,
             'avg_coverage': avg_coverage,
-            'cumulative_candidates': candidates_explored
+            'cumulative_candidates': candidates_explored,
+            'depth_auc': depth_auc
         })
         
         print(f"After furthest-from-diagonal selection: {len(candidate_subgroups)} -> {width} subgroups")
@@ -2248,16 +2795,23 @@ def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, mi
     # Calculate final results
     elapsed_time = time.time() - start_time
     
-    if all_subgroups:
-        roc_points = [(sg['fpr'], sg['tpr']) for sg in all_subgroups]
+    if current_subgroups:
+        # Use current_subgroups with optional pruning if too many
+        max_width = 50
+        if len(current_subgroups) > max_width:
+            final_subgroups = adaptive_roc_pruning(current_subgroups, None)[:max_width]
+        else:
+            final_subgroups = current_subgroups
+        
+        roc_points = [(sg['fpr'], sg['tpr']) for sg in final_subgroups]
         roc_metrics = calculate_roc_metrics(roc_points)
-        best_sg = max(all_subgroups, key=lambda x: x['roc_quality'])
+        best_sg = max(final_subgroups, key=lambda x: x['roc_quality'])
         
         result = {
             'algorithm': f'Furthest from Diagonal (n={n_points})',
-            'adaptive_width': len(current_subgroups),
+            'adaptive_width': len(final_subgroups),
             'total_candidates': candidates_explored,
-            'final_subgroups': len(all_subgroups),
+            'final_subgroups': len(final_subgroups),
             'search_time': elapsed_time,
             'auc_approx': roc_metrics['auc'],
             'best_quality': best_sg['roc_quality'],
@@ -2265,7 +2819,7 @@ def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, mi
             'best_fpr': best_sg['fpr'],
             'best_precision': best_sg['precision'],
             'best_coverage': best_sg['coverage'],
-            'subgroups': all_subgroups,
+            'subgroups': final_subgroups,
             'depth_analysis': depth_analysis,
             'hull_comparisons': hull_comparisons
         }
@@ -2282,7 +2836,7 @@ def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, mi
     return None
 
 
-def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_depth=3, min_coverage=50):
+def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_depth=3, min_coverage=50, start_from_pure_roc=None):
     """
     ROC search using below-hull threshold strategy: at each depth, keep points
     within percentage threshold below the convex hull.
@@ -2293,11 +2847,14 @@ def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_d
         distance_percentage: Percentage threshold (default 1.0%)
         max_depth: Maximum search depth
         min_coverage: Minimum coverage for subgroups
+        start_from_pure_roc: If provided, use Pure ROC result at depth 1 as starting point
     
     Returns:
         Dictionary with search results
     """
     print(f"\n=== Below Hull Threshold Search (threshold={distance_percentage}%) ===")
+    if start_from_pure_roc:
+        print(f"Starting from Pure ROC result at depth 1 (width: {len(start_from_pure_roc)})")
     start_time = time.time()
     
     # Initialize with population
@@ -2308,7 +2865,21 @@ def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_d
     
     population_stats['roc_quality'] = roc_quality_measure(population_stats['tpr'], population_stats['fpr'], None)
     
-    current_subgroups = [population_stats]
+    # If starting from Pure ROC, use those subgroups at depth 1; otherwise start with population
+    if start_from_pure_roc and len(start_from_pure_roc) > 0:
+        current_subgroups = start_from_pure_roc
+        # Pure ROC depth 1 subgroups already have 1 condition each
+        # So we start generating at depth 2, but still show depth 1 in results
+        start_depth = 2
+        # Flag to indicate we're using Pure ROC start
+        using_pure_roc_start = True
+        # Add 1 to max_depth to compensate for starting at depth 2
+        effective_max_depth = max_depth + 1
+    else:
+        current_subgroups = [population_stats]
+        start_depth = 1
+        using_pure_roc_start = False
+        effective_max_depth = max_depth
     all_subgroups = [population_stats]
     
     candidates_explored = 0
@@ -2316,26 +2887,46 @@ def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_d
     hull_comparisons = []
     
     # Add depth 0
-    depth_analysis.append({
-        'depth': 0,
-        'subgroups_start': 1,
-        'candidates_generated': 0,
-        'subgroups_after_pruning': 1,
-        'width': 1,
-        'best_quality': population_stats['roc_quality'],
-        'avg_coverage': population_stats['coverage'],
-        'cumulative_candidates': 0
-    })
+    if using_pure_roc_start:
+        # When starting from Pure ROC, depth 0 = Pure ROC's depth 1 result
+        depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
+        depth_0_auc = calculate_roc_metrics(depth_points)['auc']
+        depth_analysis.append({
+            'depth': 0,
+            'subgroups_start': len(current_subgroups),
+            'candidates_generated': 0,
+            'subgroups_after_pruning': len(current_subgroups),
+            'width': len(current_subgroups),
+            'best_quality': max([sg['roc_quality'] for sg in current_subgroups]),
+            'avg_coverage': np.mean([sg['coverage'] for sg in current_subgroups]),
+            'cumulative_candidates': 0,
+            'depth_auc': depth_0_auc
+        })
+    else:
+        depth_0_auc = calculate_roc_metrics([(population_stats['fpr'], population_stats['tpr'])])['auc']
+        depth_analysis.append({
+            'depth': 0,
+            'subgroups_start': 1,
+            'candidates_generated': 0,
+            'subgroups_after_pruning': 1,
+            'width': 1,
+            'best_quality': population_stats['roc_quality'],
+            'avg_coverage': population_stats['coverage'],
+            'cumulative_candidates': 0,
+            'depth_auc': depth_0_auc
+        })
     
-    for depth in range(1, max_depth + 1):
-        print(f"\n--- Depth {depth} ---")
+    for depth in range(start_depth, effective_max_depth + 1):
+        # When using Pure ROC start, map depth 2->1, 3->2, 4->3, 5->4
+        output_depth = depth - 1 if using_pure_roc_start else depth
+        print(f"\n--- Depth {output_depth} ---")
         
         # Generate candidates
-        candidates, hull_comp = generate_candidates(data, target_col, current_subgroups, depth, min_coverage)
+        candidates, hull_comp = generate_candidates(data, target_col, current_subgroups, depth, min_coverage, max_candidates=10000)
         candidates_explored += len(candidates)
         
         if not candidates:
-            print(f"No candidates at depth {depth}")
+            print(f"No candidates at depth {output_depth}")
             break
         
         print(f"Generated {len(candidates)} candidates")
@@ -2350,46 +2941,113 @@ def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_d
         
         all_subgroups.extend(candidate_subgroups)
         
-        # Apply below-hull threshold pruning
-        roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in candidate_subgroups])
-        
-        if len(roc_points) >= 3:
-            hull_data = select_points_below_hull(roc_points, distance_percentage, return_details=True, exclude_hull_points=True)
-            hull_data['depth'] = depth
-            hull_comparisons.append(hull_data)
+        # Special handling for Pure ROC start at first iteration (depth=2, output_depth=1)
+        # We want to select points from NEW candidates that are below Pure ROC's hull
+        if using_pure_roc_start and depth == 2:
+            # Get Pure ROC hull and select candidates below it
+            pure_roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in current_subgroups])
+            candidate_points = np.array([(sg['fpr'], sg['tpr']) for sg in candidate_subgroups])
             
-            new_hull_points = hull_data.get('new_hull', np.array([]))
-            
-            if len(new_hull_points) > 0:
-                # Find subgroups corresponding to selected points (optimized)
-                kept_subgroups = []
-                selected_points = hull_data.get('selected_points', new_hull_points)
-                selected_set = set(map(lambda pt: (round(pt[0], 6), round(pt[1], 6)), selected_points))
-                
-                for sg in candidate_subgroups:
-                    sg_point = (round(sg['fpr'], 6), round(sg['tpr'], 6))
-                    if sg_point in selected_set:
-                        kept_subgroups.append(sg)
-                
-                current_subgroups = kept_subgroups if kept_subgroups else candidate_subgroups[:10]
+            if len(pure_roc_points) >= 3 and len(candidate_points) > 0:
+                # Calculate Pure ROC's convex hull
+                above_diag_pure = pure_roc_points[pure_roc_points[:, 1] > pure_roc_points[:, 0]]
+                if len(above_diag_pure) >= 3:
+                    extended = np.vstack([[0, 0], above_diag_pure, [1, 1]])
+                    pure_hull = ConvexHull(extended)
+                    pure_hull_indices = [i - 1 for i in pure_hull.vertices if 1 <= i <= len(above_diag_pure)]
+                    pure_hull_points = above_diag_pure[pure_hull_indices]
+                    
+                    # Calculate distance from each candidate to Pure ROC hull
+                    from scipy.spatial import KDTree
+                    hull_tree = KDTree(pure_hull_points)
+                    distances, _ = hull_tree.query(candidate_points)
+                    
+                    # Calculate threshold distance (percentage of diagonal length)
+                    threshold_distance = distance_percentage / 100.0 * np.sqrt(2)
+                    
+                    # Select candidates within threshold distance below hull
+                    below_threshold_mask = distances <= threshold_distance
+                    selected_indices = np.where(below_threshold_mask)[0]
+                    
+                    if len(selected_indices) > 0:
+                        selected_subgroups = [candidate_subgroups[i] for i in selected_indices]
+                        # Apply pruning if too many
+                        max_width = 100
+                        if len(selected_subgroups) > max_width:
+                            selected_subgroups = adaptive_roc_pruning(selected_subgroups, None)[:max_width]
+                        
+                        # Combine Pure ROC subgroups + selected from candidates
+                        current_subgroups = current_subgroups + selected_subgroups
+                        print(f"Pure ROC start: {len(pure_roc_points)} Pure ROC + {len(selected_subgroups)} selected = {len(current_subgroups)} total")
+                    else:
+                        # No candidates within threshold, just keep Pure ROC
+                        print(f"Pure ROC start: {len(pure_roc_points)} Pure ROC + 0 selected (none within threshold)")
+                else:
+                    # Fallback: use threshold selection on all candidates
+                    current_subgroups = current_subgroups + candidate_subgroups[:10]
             else:
-                current_subgroups = candidate_subgroups[:10]
+                current_subgroups = current_subgroups + candidate_subgroups[:10]
         else:
-            current_subgroups = candidate_subgroups
+            # Normal processing: combine first, then select
+            # FIXED: Combine previous depth's subgroups with new candidates before selection
+            combined_subgroups = current_subgroups + candidate_subgroups
+            
+            # Apply below-hull threshold pruning on combined set
+            roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in combined_subgroups])
+            
+            if len(roc_points) >= 3:
+                hull_data = select_points_below_hull(roc_points, distance_percentage, return_details=True, exclude_hull_points=True)
+                hull_data['depth'] = output_depth
+                hull_comparisons.append(hull_data)
+                
+                # Get combined_points which includes hull + selected
+                combined_points = hull_data.get('combined_points', np.array([]))
+                
+                if len(combined_points) > 0:
+                    # Find subgroups corresponding to combined points
+                    kept_subgroups = []
+                    combined_set = set(map(lambda pt: (round(pt[0], 6), round(pt[1], 6)), combined_points))
+                    
+                    # FIXED: Search in combined_subgroups to find matching points
+                    for sg in combined_subgroups:
+                        sg_point = (round(sg['fpr'], 6), round(sg['tpr'], 6))
+                        if sg_point in combined_set:
+                            kept_subgroups.append(sg)
+                    
+                    # Apply pruning if too many subgroups to prevent explosion at deeper levels
+                    # PRUNING SETTING (Below Hull): Changed from 50 to 100 to maintain diversity
+                    # TO REVERT: Change max_width back to 50
+                    max_width = 100
+                    if len(kept_subgroups) > max_width:
+                        current_subgroups = adaptive_roc_pruning(kept_subgroups, None)[:max_width]
+                    else:
+                        current_subgroups = kept_subgroups if kept_subgroups else combined_subgroups[:10]
+                else:
+                    current_subgroups = combined_subgroups[:10]
+            else:
+                current_subgroups = combined_subgroups
         
         width = len(current_subgroups)
         best_quality = max([sg['roc_quality'] for sg in current_subgroups]) if current_subgroups else 0
         avg_coverage = np.mean([sg['coverage'] for sg in current_subgroups]) if current_subgroups else 0
         
+        # Calculate AUC at this depth
+        if current_subgroups:
+            depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
+            depth_auc = calculate_roc_metrics(depth_points)['auc']
+        else:
+            depth_auc = 0.0
+        
         depth_analysis.append({
-            'depth': depth,
+            'depth': output_depth,  # Use output_depth for Pure ROC start compatibility
             'subgroups_start': len(candidate_subgroups),
             'candidates_generated': len(candidates),
             'subgroups_after_pruning': len(current_subgroups),
             'width': width,
             'best_quality': best_quality,
             'avg_coverage': avg_coverage,
-            'cumulative_candidates': candidates_explored
+            'cumulative_candidates': candidates_explored,
+            'depth_auc': depth_auc
         })
         
         print(f"After below-hull threshold selection: {len(candidate_subgroups)} -> {width} subgroups")
@@ -2397,16 +3055,23 @@ def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_d
     # Calculate final results
     elapsed_time = time.time() - start_time
     
-    if all_subgroups:
-        roc_points = [(sg['fpr'], sg['tpr']) for sg in all_subgroups]
+    if current_subgroups:
+        # Use current_subgroups with optional pruning if too many
+        max_width = 50
+        if len(current_subgroups) > max_width:
+            final_subgroups = adaptive_roc_pruning(current_subgroups, None)[:max_width]
+        else:
+            final_subgroups = current_subgroups
+        
+        roc_points = [(sg['fpr'], sg['tpr']) for sg in final_subgroups]
         roc_metrics = calculate_roc_metrics(roc_points)
-        best_sg = max(all_subgroups, key=lambda x: x['roc_quality'])
+        best_sg = max(final_subgroups, key=lambda x: x['roc_quality'])
         
         result = {
             'algorithm': f'Below Hull Threshold ({distance_percentage}%)',
-            'adaptive_width': len(current_subgroups),
+            'adaptive_width': len(final_subgroups),
             'total_candidates': candidates_explored,
-            'final_subgroups': len(all_subgroups),
+            'final_subgroups': len(final_subgroups),
             'search_time': elapsed_time,
             'auc_approx': roc_metrics['auc'],
             'best_quality': best_sg['roc_quality'],
@@ -2414,7 +3079,7 @@ def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_d
             'best_fpr': best_sg['fpr'],
             'best_precision': best_sg['precision'],
             'best_coverage': best_sg['coverage'],
-            'subgroups': all_subgroups,
+            'subgroups': final_subgroups,
             'depth_analysis': depth_analysis,
             'hull_comparisons': hull_comparisons
         }
@@ -2431,7 +3096,7 @@ def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_d
     return None
 
 
-def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, max_depth=3, min_coverage=50):
+def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, max_depth=3, min_coverage=50, start_from_pure_roc=None):
     """
     ROC search using above-diagonal threshold strategy: at each depth, keep points
     above percentage threshold from the diagonal.
@@ -2442,11 +3107,14 @@ def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, m
         distance_percentage: Percentage threshold (default 1.0%)
         max_depth: Maximum search depth
         min_coverage: Minimum coverage for subgroups
+        start_from_pure_roc: If provided, use Pure ROC result at depth 1 as starting point
     
     Returns:
         Dictionary with search results
     """
     print(f"\n=== Above Diagonal Threshold Search (threshold={distance_percentage}%) ===")
+    if start_from_pure_roc:
+        print(f"Starting from Pure ROC result at depth 1 (width: {len(start_from_pure_roc)})")
     start_time = time.time()
     
     # Initialize with population
@@ -2457,7 +3125,21 @@ def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, m
     
     population_stats['roc_quality'] = roc_quality_measure(population_stats['tpr'], population_stats['fpr'], None)
     
-    current_subgroups = [population_stats]
+    # If starting from Pure ROC, use those subgroups at depth 1; otherwise start with population
+    if start_from_pure_roc and len(start_from_pure_roc) > 0:
+        current_subgroups = start_from_pure_roc
+        # Pure ROC depth 1 subgroups already have 1 condition each
+        # So we start generating at depth 2, but still show depth 1 in results
+        start_depth = 2
+        # Flag to indicate we're using Pure ROC start
+        using_pure_roc_start = True
+        # Add 1 to max_depth to compensate for starting at depth 2
+        effective_max_depth = max_depth + 1
+    else:
+        current_subgroups = [population_stats]
+        start_depth = 1
+        using_pure_roc_start = False
+        effective_max_depth = max_depth
     all_subgroups = [population_stats]
     
     candidates_explored = 0
@@ -2465,26 +3147,46 @@ def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, m
     hull_comparisons = []
     
     # Add depth 0
-    depth_analysis.append({
-        'depth': 0,
-        'subgroups_start': 1,
-        'candidates_generated': 0,
-        'subgroups_after_pruning': 1,
-        'width': 1,
-        'best_quality': population_stats['roc_quality'],
-        'avg_coverage': population_stats['coverage'],
-        'cumulative_candidates': 0
-    })
+    if using_pure_roc_start:
+        # When starting from Pure ROC, depth 0 = Pure ROC's depth 1 result
+        depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
+        depth_0_auc = calculate_roc_metrics(depth_points)['auc']
+        depth_analysis.append({
+            'depth': 0,
+            'subgroups_start': len(current_subgroups),
+            'candidates_generated': 0,
+            'subgroups_after_pruning': len(current_subgroups),
+            'width': len(current_subgroups),
+            'best_quality': max([sg['roc_quality'] for sg in current_subgroups]),
+            'avg_coverage': np.mean([sg['coverage'] for sg in current_subgroups]),
+            'cumulative_candidates': 0,
+            'depth_auc': depth_0_auc
+        })
+    else:
+        depth_0_auc = calculate_roc_metrics([(population_stats['fpr'], population_stats['tpr'])])['auc']
+        depth_analysis.append({
+            'depth': 0,
+            'subgroups_start': 1,
+            'candidates_generated': 0,
+            'subgroups_after_pruning': 1,
+            'width': 1,
+            'best_quality': population_stats['roc_quality'],
+            'avg_coverage': population_stats['coverage'],
+            'cumulative_candidates': 0,
+            'depth_auc': depth_0_auc
+        })
     
-    for depth in range(1, max_depth + 1):
-        print(f"\n--- Depth {depth} ---")
+    for depth in range(start_depth, effective_max_depth + 1):
+        # When using Pure ROC start, map depth 2->1, 3->2, 4->3, 5->4
+        output_depth = depth - 1 if using_pure_roc_start else depth
+        print(f"\n--- Depth {output_depth} ---")
         
         # Generate candidates
-        candidates, hull_comp = generate_candidates(data, target_col, current_subgroups, depth, min_coverage)
+        candidates, hull_comp = generate_candidates(data, target_col, current_subgroups, depth, min_coverage, max_candidates=10000)
         candidates_explored += len(candidates)
         
         if not candidates:
-            print(f"No candidates at depth {depth}")
+            print(f"No candidates at depth {output_depth}")
             break
         
         print(f"Generated {len(candidates)} candidates")
@@ -2499,46 +3201,97 @@ def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, m
         
         all_subgroups.extend(candidate_subgroups)
         
-        # Apply above-diagonal threshold pruning
-        roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in candidate_subgroups])
-        
-        if len(roc_points) >= 3:
-            hull_data = select_points_above_diagonal(roc_points, distance_percentage, return_details=True, exclude_hull_points=True)
-            hull_data['depth'] = depth
-            hull_comparisons.append(hull_data)
+        # Special handling for Pure ROC start at first iteration (depth=2, output_depth=1)
+        # We want to select points from NEW candidates that are above diagonal threshold
+        if using_pure_roc_start and depth == 2:
+            # Select candidates above diagonal threshold
+            candidate_points = [(sg['fpr'], sg['tpr'], sg['tpr'] - sg['fpr']) for sg in candidate_subgroups]
             
-            new_hull_points = hull_data.get('new_hull', np.array([]))
-            
-            if len(new_hull_points) > 0:
-                # Find subgroups corresponding to selected points (optimized)
-                kept_subgroups = []
-                selected_points = hull_data.get('selected_points', new_hull_points)
-                selected_set = set(map(lambda pt: (round(pt[0], 6), round(pt[1], 6)), selected_points))
+            if len(candidate_points) > 0:
+                # Calculate threshold distance (percentage of diagonal length)
+                threshold_distance = distance_percentage / 100.0 * np.sqrt(2)
                 
-                for sg in candidate_subgroups:
-                    sg_point = (round(sg['fpr'], 6), round(sg['tpr'], 6))
-                    if sg_point in selected_set:
-                        kept_subgroups.append(sg)
+                # Select candidates above threshold
+                above_threshold_indices = [i for i, (fpr, tpr, dist) in enumerate(candidate_points) 
+                                          if dist >= threshold_distance]
                 
-                current_subgroups = kept_subgroups if kept_subgroups else candidate_subgroups[:10]
+                if len(above_threshold_indices) > 0:
+                    selected_subgroups = [candidate_subgroups[i] for i in above_threshold_indices]
+                    # Apply pruning if too many
+                    max_width = 100
+                    if len(selected_subgroups) > max_width:
+                        selected_subgroups = adaptive_roc_pruning(selected_subgroups, None)[:max_width]
+                    
+                    # Combine Pure ROC subgroups + selected from candidates
+                    current_subgroups = current_subgroups + selected_subgroups
+                    print(f"Pure ROC start: {len(start_from_pure_roc)} Pure ROC + {len(selected_subgroups)} selected = {len(current_subgroups)} total")
+                else:
+                    # No candidates above threshold, just keep Pure ROC
+                    print(f"Pure ROC start: {len(start_from_pure_roc)} Pure ROC + 0 selected (none above threshold)")
             else:
-                current_subgroups = candidate_subgroups[:10]
+                current_subgroups = current_subgroups + candidate_subgroups[:10]
         else:
-            current_subgroups = candidate_subgroups
+            # Normal processing: combine first, then select
+            # FIXED: Combine previous depth's subgroups with new candidates before selection
+            combined_subgroups = current_subgroups + candidate_subgroups
+            
+            # Apply above-diagonal threshold pruning on combined set
+            roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in combined_subgroups])
+            
+            if len(roc_points) >= 3:
+                # CHANGED: exclude_hull_points=False to keep the best quality points (hull points)
+                hull_data = select_points_above_diagonal(roc_points, distance_percentage, return_details=True, exclude_hull_points=False)
+                hull_data['depth'] = output_depth
+                hull_comparisons.append(hull_data)
+                
+                # Get combined_points which includes hull + selected
+                combined_points = hull_data.get('combined_points', np.array([]))
+                
+                if len(combined_points) > 0:
+                    # Find subgroups corresponding to combined points
+                    kept_subgroups = []
+                    combined_set = set(map(lambda pt: (round(pt[0], 6), round(pt[1], 6)), combined_points))
+                    
+                    # FIXED: Search in combined_subgroups to find matching points
+                    for sg in combined_subgroups:
+                        sg_point = (round(sg['fpr'], 6), round(sg['tpr'], 6))
+                        if sg_point in combined_set:
+                            kept_subgroups.append(sg)
+                    
+                    # Apply pruning if too many subgroups to prevent explosion at deeper levels
+                    # PRUNING SETTING (Above Diagonal): Changed from 50 to 100 to maintain diversity
+                    # TO REVERT: Change max_width back to 50
+                    max_width = 100
+                    if len(kept_subgroups) > max_width:
+                        current_subgroups = adaptive_roc_pruning(kept_subgroups, None)[:max_width]
+                    else:
+                        current_subgroups = kept_subgroups if kept_subgroups else combined_subgroups[:10]
+                else:
+                    current_subgroups = combined_subgroups[:10]
+            else:
+                current_subgroups = combined_subgroups
         
         width = len(current_subgroups)
         best_quality = max([sg['roc_quality'] for sg in current_subgroups]) if current_subgroups else 0
         avg_coverage = np.mean([sg['coverage'] for sg in current_subgroups]) if current_subgroups else 0
         
+        # Calculate AUC at this depth
+        if current_subgroups:
+            depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
+            depth_auc = calculate_roc_metrics(depth_points)['auc']
+        else:
+            depth_auc = 0.0
+        
         depth_analysis.append({
-            'depth': depth,
+            'depth': output_depth,  # Use output_depth for Pure ROC start compatibility
             'subgroups_start': len(candidate_subgroups),
             'candidates_generated': len(candidates),
             'subgroups_after_pruning': len(current_subgroups),
             'width': width,
             'best_quality': best_quality,
             'avg_coverage': avg_coverage,
-            'cumulative_candidates': candidates_explored
+            'cumulative_candidates': candidates_explored,
+            'depth_auc': depth_auc
         })
         
         print(f"After above-diagonal threshold selection: {len(candidate_subgroups)} -> {width} subgroups")
@@ -2546,16 +3299,23 @@ def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, m
     # Calculate final results
     elapsed_time = time.time() - start_time
     
-    if all_subgroups:
-        roc_points = [(sg['fpr'], sg['tpr']) for sg in all_subgroups]
+    if current_subgroups:
+        # Use current_subgroups with optional pruning if too many
+        max_width = 50
+        if len(current_subgroups) > max_width:
+            final_subgroups = adaptive_roc_pruning(current_subgroups, None)[:max_width]
+        else:
+            final_subgroups = current_subgroups
+        
+        roc_points = [(sg['fpr'], sg['tpr']) for sg in final_subgroups]
         roc_metrics = calculate_roc_metrics(roc_points)
-        best_sg = max(all_subgroups, key=lambda x: x['roc_quality'])
+        best_sg = max(final_subgroups, key=lambda x: x['roc_quality'])
         
         result = {
             'algorithm': f'Above Diagonal Threshold ({distance_percentage}%)',
-            'adaptive_width': len(current_subgroups),
+            'adaptive_width': len(final_subgroups),
             'total_candidates': candidates_explored,
-            'final_subgroups': len(all_subgroups),
+            'final_subgroups': len(final_subgroups),
             'search_time': elapsed_time,
             'auc_approx': roc_metrics['auc'],
             'best_quality': best_sg['roc_quality'],
@@ -2563,7 +3323,7 @@ def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, m
             'best_fpr': best_sg['fpr'],
             'best_precision': best_sg['precision'],
             'best_coverage': best_sg['coverage'],
-            'subgroups': all_subgroups,
+            'subgroups': final_subgroups,
             'depth_analysis': depth_analysis,
             'hull_comparisons': hull_comparisons
         }
@@ -2589,6 +3349,9 @@ def create_depth_analysis_table(results, output_dir):
         # Use algorithm name from result if available, otherwise format from alpha
         alpha_str = result.get('algorithm', 'Pure ROC' if alpha == 'pure_roc' or alpha is None else f'α = {alpha}')
         
+        # Get the final width from the last depth level
+        final_width_value = result['depth_analysis'][-1]['width'] if result['depth_analysis'] else 0
+        
         for depth_info in result['depth_analysis']:
             depth_info_copy = depth_info.copy()
             depth_info_copy['algorithm'] = alpha_str
@@ -2598,7 +3361,8 @@ def create_depth_analysis_table(results, output_dir):
                 depth_info_copy['width'] = depth_info_copy['subgroups_after_pruning']
             # Add AUC and width from final results
             depth_info_copy['final_auc'] = result['auc_approx']
-            depth_info_copy['final_width'] = result['adaptive_width']
+            # Use width from the last depth level (not adaptive_width)
+            depth_info_copy['final_width'] = final_width_value
             all_depth_data.append(depth_info_copy)
     
     # Create DataFrame
@@ -2609,7 +3373,7 @@ def create_depth_analysis_table(results, output_dir):
         'algorithm', 'alpha_value', 'depth', 'subgroups_start', 
         'candidates_generated', 'subgroups_after_pruning', 'width',
         'best_quality', 'avg_coverage', 'cumulative_candidates',
-        'final_auc', 'final_width'
+        'depth_auc','final_auc', 'final_width'
     ]
     depth_df = depth_df[column_order]
     
@@ -2960,7 +3724,7 @@ def preprocess_categorical_data(df):
     
     return df_processed
 
-def run_batch_analysis(data_dir, alphas=None, depth=3, min_coverage=50, output_dir='./runs/batch_analysis'):
+def run_batch_analysis(data_dir, alphas=None, depth=3, min_coverage=50, output_dir='./runs/batch_analysis', start_from_pure_roc=False):
     """
     Run ROC search on multiple datasets and consolidate results.
     
@@ -2970,6 +3734,7 @@ def run_batch_analysis(data_dir, alphas=None, depth=3, min_coverage=50, output_d
         depth: Maximum search depth
         min_coverage: Minimum subgroup coverage
         output_dir: Output directory for consolidated results
+        start_from_pure_roc: If True, methods 2-6 will start from Pure ROC's depth 1 result
     
     Returns:
         Dictionary containing consolidated results
@@ -3016,44 +3781,58 @@ def run_batch_analysis(data_dir, alphas=None, depth=3, min_coverage=50, output_d
         print(f"{'='*60}")
         
         # Method 1: Pure ROC Search (original)
+        pure_roc_depth1_subgroups = None
         if alphas is None:
             print("\n>>> Method 1: Pure ROC Search")
             result = true_roc_search(data, target_col, None, depth, min_coverage)
             if result:
                 result['pure_roc']['dataset'] = dataset_name
                 dataset_results['pure_roc'] = result['pure_roc']
+                
+                # Extract depth 1 subgroups if starting other methods from Pure ROC
+                if start_from_pure_roc and 'depth_1_subgroups' in result['pure_roc']:
+                    pure_roc_depth1_subgroups = result['pure_roc']['depth_1_subgroups']
+                    if pure_roc_depth1_subgroups:
+                        print(f"Methods 2-6 will start from Pure ROC depth 1 ({len(pure_roc_depth1_subgroups)} subgroups)")
+                    else:
+                        print("Warning: Pure ROC depth 1 subgroups not available")
         
         # Method 2: Hull Removal Search
         print("\n>>> Method 2: Hull Removal Search")
-        result = hull_removal_search(data, target_col, depth, min_coverage)
+        result = hull_removal_search(data, target_col, depth, min_coverage, 
+                                     start_from_pure_roc=pure_roc_depth1_subgroups)
         if result:
             result['dataset'] = dataset_name
             dataset_results['hull_removal'] = result
         
         # Method 3: Closest to Hull Search
         print("\n>>> Method 3: Closest to Hull Search")
-        result = closest_to_hull_search(data, target_col, n_points=10, max_depth=depth, min_coverage=min_coverage)
+        result = closest_to_hull_search(data, target_col, n_points=10, max_depth=depth, min_coverage=min_coverage, 
+                                       start_from_pure_roc=pure_roc_depth1_subgroups)
         if result:
             result['dataset'] = dataset_name
             dataset_results['closest_to_hull'] = result
         
         # Method 4: Furthest from Diagonal Search
         print("\n>>> Method 4: Furthest from Diagonal Search")
-        result = furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=depth, min_coverage=min_coverage)
+        result = furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=depth, min_coverage=min_coverage,
+                                              start_from_pure_roc=pure_roc_depth1_subgroups)
         if result:
             result['dataset'] = dataset_name
             dataset_results['furthest_diagonal'] = result
         
         # Method 5: Below Hull Threshold Search
         print("\n>>> Method 5: Below Hull Threshold Search")
-        result = below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_depth=depth, min_coverage=min_coverage)
+        result = below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_depth=depth, min_coverage=min_coverage,
+                                            start_from_pure_roc=pure_roc_depth1_subgroups)
         if result:
             result['dataset'] = dataset_name
             dataset_results['below_hull'] = result
         
         # Method 6: Above Diagonal Threshold Search
         print("\n>>> Method 6: Above Diagonal Threshold Search")
-        result = above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, max_depth=depth, min_coverage=min_coverage)
+        result = above_diagonal_threshold_search(data, target_col, distance_percentage=10.0, max_depth=depth, min_coverage=min_coverage,
+                                                start_from_pure_roc=pure_roc_depth1_subgroups)
         if result:
             result['dataset'] = dataset_name
             dataset_results['above_diagonal'] = result
@@ -3261,6 +4040,8 @@ def main():
                        help='Run batch analysis on all datasets in tests directory')
     parser.add_argument('--data-dir', default='./tests', 
                        help='Directory containing datasets (for batch mode)')
+    parser.add_argument('--start-from-pure-roc', action='store_true',
+                       help='Methods 2-6 start from Pure ROC depth 1 result (batch mode only)')
     
     args = parser.parse_args()
     
@@ -3280,13 +4061,16 @@ def main():
         print(f"Max depth: {args.depth}")
         print(f"Min coverage: {args.min_coverage}")
         print(f"Output: {args.output}")
+        if args.start_from_pure_roc:
+            print(f"Starting methods 2-6 from Pure ROC depth 1 result: YES")
         
         results = run_batch_analysis(
             args.data_dir, 
             alphas, 
             args.depth, 
             args.min_coverage, 
-            args.output
+            args.output,
+            args.start_from_pure_roc
         )
         
         if results:
@@ -3332,3 +4116,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

@@ -1,2 +1,0 @@
-depth,total_points,original_hull_points,new_hull_points,remaining_points,subgroups_removed,original_hull_area,new_hull_area,hull_area_reduction,area_reduction_percentage,original_auc,new_auc,all_points_auc,auc_reduction,auc_reduction_percentage,original_max_quality,original_avg_quality,new_max_quality,new_avg_quality,quality_reduction,original_best_tpr,original_best_fpr,new_best_tpr,new_best_fpr
-1,51,5,0,0,0,0.0819704433497537,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0

@@ -1,6 +1,0 @@
-algorithm,alpha_value,depth,subgroups_start,candidates_generated,subgroups_after_pruning,width,best_quality,avg_coverage,cumulative_candidates,final_auc,final_width
-Closest to Hull (n=10),closest_to_hull,0,1,0,1,1,0.0,1000.0,0,0.5898381375718397,960
-Closest to Hull (n=10),closest_to_hull,1,120,120,10,10,0.5176005747126438,753.9,120,0.5898381375718397,960
-Closest to Hull (n=10),closest_to_hull,2,1042,1042,11,11,0.5493444683908046,436.6363636363636,1162,0.5898381375718397,960
-Closest to Hull (n=10),closest_to_hull,3,880,880,44,44,0.02864583333333337,978.0,2042,0.5898381375718397,960
-Closest to Hull (n=10),closest_to_hull,4,4140,4140,960,960,0.45460668103448276,945.8,6182,0.5898381375718397,960

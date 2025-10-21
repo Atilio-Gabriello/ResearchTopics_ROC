@@ -1,0 +1,7 @@
+{
+  "alpha": "above_diagonal",
+  "adaptive_width": 4,
+  "algorithm": "true_roc_search",
+  "total_candidates": 11619,
+  "search_time": 123.209468126297
+}

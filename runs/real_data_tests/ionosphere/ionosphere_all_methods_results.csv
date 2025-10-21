@@ -1,6 +1,0 @@
-dataset,depth,method,n_points,original_auc,new_auc,auc_change_pct,new_hull_points,avg_vertical_distance,avg_tpr_selected
-ionosphere,1,remove_hull,3,0.7855555555555556,0.7517460317460318,4.303899777732865,3,,
-ionosphere,1,closest_to_hull (exclude=True),5,0.7855555555555556,0.7517460317460318,4.303899777732865,3,,
-ionosphere,1,furthest_from_diagonal (exclude=True),5,0.7855555555555556,0.7517460317460318,4.303899777732865,3,,
-ionosphere,1,below_hull (exclude=True),5,0.7855555555555556,0.7517460317460318,4.303899777732865,3,0.06089165464165465,
-ionosphere,1,above_diagonal (exclude=True),5,0.7855555555555556,0.7517460317460318,4.303899777732865,3,,0.5337301587301587

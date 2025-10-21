@@ -1,0 +1,8 @@
+rank,conditions,coverage,coverage_ratio,tpr,fpr,precision,roc_quality,keep_reason
+1,Uniformity_of_cell_size != 1.0 AND Single_epithelial_cell_size != 1 AND Bland_chromatin >= 3.0 AND Uniformity_of_cell_shape != 1.0,253,0.37042459736456806,0.9497907949790795,0.05855855855855856,0.8972332015810277,0.891232236420521,ROC_HULL
+2,Uniformity_of_cell_size != 1.0 AND Single_epithelial_cell_size != 1 AND Sample_code_number != 1171795.0 AND Uniformity_of_cell_shape != 1.0,285,0.4172767203513909,0.9832635983263598,0.11261261261261261,0.8245614035087719,0.8706509857137472,HIGH_QUALITY
+3,Uniformity_of_cell_size != 1.0 AND Single_epithelial_cell_size != 1 AND Bland_chromatin >= 3.0 AND Uniformity_of_cell_shape != 1.0 AND Bare_nuclei >= 1.0,229,0.33528550512445093,0.891213389121339,0.036036036036036036,0.9301310043668122,0.855177353085303,ROC_HULL
+4,Uniformity_of_cell_shape != 1.0 AND Single_epithelial_cell_size != 1,333,0.48755490483162517,0.9916317991631799,0.21621621621621623,0.7117117117117117,0.7754155829469637,ROC_HULL
+5,Uniformity_of_cell_shape != 1.0 AND Single_epithelial_cell_size != 1 AND Uniformity_of_cell_size >= 5.0,175,0.2562225475841874,0.7196652719665272,0.006756756756756757,0.9828571428571429,0.7129085152097704,ROC_HULL
+6,Uniformity_of_cell_size >= 5.0 AND Bare_nuclei <= 1.0,106,0.15519765739385066,0.4435146443514644,0.0,1.0,0.4435146443514644,ROC_HULL
+7,Sample_code_number != 1171795.0,682,0.9985358711566618,1.0,0.9977477477477478,0.35043988269794724,0.0022522522522522292,ROC_HULL
