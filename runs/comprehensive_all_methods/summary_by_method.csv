@@ -1,9 +1,0 @@
-,auc,auc,auc,auc,time_seconds,time_seconds
-,mean,std,min,max,mean,sum
-method,,,,,,
-above_diagonal_percentage,,,,,0.0086,1.0365
-basic_roc_search,0.5573,0.0646,0.4965,0.7163,86.6869,2080.4864
-below_hull_percentage,,,,,0.0257,3.0851
-closest_points_to_hull,,,,,0.0107,1.0308
-furthest_from_diagonal,,,,,0.0098,0.9366
-remove_hull_points,,,,,0.0113,0.2714

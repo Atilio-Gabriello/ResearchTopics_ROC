@@ -1,7 +1,7 @@
 {
   "alpha": "hull_removal",
-  "adaptive_width": 438,
+  "adaptive_width": 10,
   "algorithm": "true_roc_search",
-  "total_candidates": 3341,
-  "search_time": 56.376487016677856
+  "total_candidates": 3156,
+  "search_time": 25.668476104736328
 }

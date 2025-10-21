@@ -1,9 +1,0 @@
-{
-  "timestamp": "2025-10-05T15:25:38.739141",
-  "alpha": 0.3,
-  "depth": 4,
-  "width": 50,
-  "min_coverage": 50,
-  "quality_function": "roc_combined",
-  "method": "manual_roc_search"
-}

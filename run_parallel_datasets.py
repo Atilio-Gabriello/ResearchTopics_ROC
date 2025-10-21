@@ -40,7 +40,7 @@ def create_single_dataset_dir(dataset_file):
     
     return dataset_dir
 
-def run_dataset_in_terminal(dataset_file, output_dir='./runs/all_methods_depth4', 
+def run_dataset_in_terminal(dataset_file, output_dir='./results', 
                             depth=4, min_coverage=50):
     """
     Launch a new PowerShell terminal to run analysis on a specific dataset.
@@ -51,14 +51,19 @@ def run_dataset_in_terminal(dataset_file, output_dir='./runs/all_methods_depth4'
     output_path = Path(output_dir)
     
     # Build the Python command - use batch mode with single dataset directory
+    # Wrap in try-catch to capture errors
     python_cmd = (
+        f'try {{ '
         f'python true_roc_search.py '
         f'--batch '
         f'--data-dir "{dataset_dir}" '
         f'--depth {depth} '
         f'--min-coverage {min_coverage} '
         f'--output "{output_path}" '
-        f'--pure-roc'
+        f'--start-from-pure-roc; '
+        f'if ($LASTEXITCODE -ne 0) {{ Write-Host "ERROR: Python script failed with exit code $LASTEXITCODE" -ForegroundColor Red }} '
+        f'else {{ Write-Host "SUCCESS: {dataset_name} completed!" -ForegroundColor Green }} '
+        f'}} catch {{ Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red }}'
     )
     
     # PowerShell command that keeps window open and shows dataset name
@@ -66,7 +71,7 @@ def run_dataset_in_terminal(dataset_file, output_dir='./runs/all_methods_depth4'
         'powershell.exe',
         '-NoExit',
         '-Command',
-        f'$host.UI.RawUI.WindowTitle = "Processing: {dataset_name}"; {python_cmd}'
+        f'$host.UI.RawUI.WindowTitle = "Processing: {dataset_name}"; {python_cmd}; Write-Host "`nPress any key to close..."; $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")'
     ]
     
     print(f"🚀 Launching terminal for: {dataset_name}")

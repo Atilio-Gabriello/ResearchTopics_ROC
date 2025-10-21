@@ -1,7 +1,7 @@
 {
   "alpha": "closest_to_hull",
-  "adaptive_width": 22,
+  "adaptive_width": 28,
   "algorithm": "true_roc_search",
-  "total_candidates": 2952,
-  "search_time": 56.424537897109985
+  "total_candidates": 2810,
+  "search_time": 33.15583109855652
 }
