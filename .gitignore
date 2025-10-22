@@ -2,3 +2,5 @@ __pycache__
 .venv
 .vscode
 .ignore
+tests/YPMSD.txt
+temp/YPMSD.txt

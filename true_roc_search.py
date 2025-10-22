@@ -30,7 +30,7 @@ import glob
 def load_data(filepath):
     """Load data from file, handling different formats."""
     try:
-        if filepath.endswith('.csv'):
+        if filepath.endswith('.csv') or filepath.endswith('.txt'):
             data = pd.read_csv(filepath)
         else:
             # Assume tab-separated or space-separated
@@ -88,14 +88,14 @@ def calculate_subgroup_stats(data, conditions, target_col):
     
     # Convert target to binary if needed
     target_values = clean_data[target_col].unique()
-    if len(target_values) == 2:
+    if len(target_values) == 2 or len(target_values) == 7:
         # Convert to binary (1 for positive class, 0 for negative)
         # For income data, positive class should be high income (gr50K, >50K, etc.)
         # For credit data, positive class might be '+' or 'good' or '1'
         positive_class = None
         for val in target_values:
             val_str = str(val).lower()
-            if any(pattern in val_str for pattern in ['gr', '>50', '+', 'good', 'yes', 'true']):
+            if any(pattern in val_str for pattern in ['gr', '>50', '+', 'good', 'yes', 'true', 'positive', '2']):
                 positive_class = val
                 break
         
@@ -141,6 +141,12 @@ def calculate_subgroup_stats(data, conditions, target_col):
         # Numeric target
         target_mean = subgroup_data[target_col].mean()
         population_mean = data[target_col].mean()
+        positive_class = None
+        for val in target_values:
+            val_str = str(val).lower()
+            if any(pattern in val_str for pattern in ['2000']):
+                positive_class = val
+                break
         
         return {
             'conditions': conditions,
@@ -3626,7 +3632,7 @@ def get_dataset_info():
         'tic-tac-toe.txt': 'class',
         'wisconsin.txt': 'Class',
         'Covertype.txt': 'Cover_Type',
-        'YPMSD.txt': '',
+        'YPMSD.txt': 'year'
     }
 
 #Change this 
@@ -3652,14 +3658,14 @@ def preprocess_categorical_data(df):
     df_processed = df_processed.reset_index(drop=True)
     
     # Now process each column to convert categorical to numerical
-    for col in df_processed.columns:
-        if df_processed[col].dtype == 'object':  # String/categorical column
-            # Get unique values and create mapping
-            unique_vals = df_processed[col].unique()
-            # Create mapping: first unique value -> 0, second -> 1, etc.
-            mapping = {val: i for i, val in enumerate(unique_vals)}
-            # Apply mapping
-            df_processed[col] = df_processed[col].map(mapping)
+    # for col in df_processed.columns:
+    #     if df_processed[col].dtype == 'object':  # String/categorical column
+    #         # Get unique values and create mapping
+    #         unique_vals = df_processed[col].unique()
+    #         # Create mapping: first unique value -> 0, second -> 1, etc.
+    #         mapping = {val: i for i, val in enumerate(unique_vals)}
+    #         # Apply mapping
+    #         df_processed[col] = df_processed[col].map(mapping)
     
     return df_processed
 
