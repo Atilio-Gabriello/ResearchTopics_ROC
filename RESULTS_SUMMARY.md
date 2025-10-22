@@ -15,7 +15,7 @@
 📊 **Wide beam Results**: See [wide_beam_summary.csv](runs/wide_beam_search/wide_beam_summary.csv) for complete wide beam search results across all 7 datasets.
 
 ### CSV Results
-✅ [`comprehensive_results.csv`](runs/comprehensive_all_methods/comprehensive_results.csv) - **All 480 experiment results** (main data file)  
+✅ [`comprehensive_results.csv`](consolidated_depth_analysis.csv) - **All 480 experiment results** (main data file)  
 ✅ `summary_by_method.csv` - Method-level aggregation  
 ✅ `summary_by_dataset.csv` - Dataset-level aggregation  
 ✅ `summary_by_depth.csv` - Depth-level analysis  
@@ -37,7 +37,7 @@ Contains 480 rows × 28 columns with detailed metrics for each experiment:
 - `selected_points` - Number of points selected by method
 - `total_points` - Total available points
 
-**File Location:** `./runs/comprehensive_all_methods/comprehensive_results.csv`  
+**File Location:** `consolidated_depth_analysis.csv`  
 **Size:** 482 lines (including header)  
 **Format:** CSV with comma separator  
 

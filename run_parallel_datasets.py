@@ -10,13 +10,13 @@ import time
 # All datasets to process
 DATASETS = [
     'adult.txt',
-    'Covertype.txt',
-    'Credit-a.txt',
-    'ionosphere.txt',
-    'mushroom.txt',
-    'tic-tac-toe.txt',
-    'wisconsin.txt',
-    'YPMSD.txt'
+    # 'Covertype.txt',
+    # 'Credit-a.txt',
+    # 'ionosphere.txt',
+    # 'mushroom.txt',
+    # 'tic-tac-toe.txt',
+    # 'wisconsin.txt',
+    # 'YPMSD.txt'
 ]
 
 def create_single_dataset_dir(dataset_file):
