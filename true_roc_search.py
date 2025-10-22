@@ -1956,6 +1956,7 @@ def true_roc_search(data, target_col, alphas=None, max_depth=4, min_coverage=50)
         hull_comparisons = []  # Track hull comparisons for each depth
         depth_1_candidates = None  # Store depth 1 candidates (before pruning) for start_from_pure_roc
         depth_1_subgroups = None  # Store depth 1 subgroups (after pruning) for start_from_pure_roc feature
+        depth_1_auc = None  # Store depth 1 AUC (for Pure ROC only) to share with other methods
         
         # Add depth 0 (population) to analysis
         depth_0_auc = calculate_roc_metrics([(population_stats['fpr'], population_stats['tpr'])])['auc']
@@ -2030,11 +2031,6 @@ def true_roc_search(data, target_col, alphas=None, max_depth=4, min_coverage=50)
             # Apply adaptive ROC pruning
             current_subgroups = adaptive_roc_pruning(all_candidates, alpha)
             
-            # Store depth 1 candidates (before pruning) and subgroups (after pruning) for start_from_pure_roc feature
-            if depth == 1 and alpha is None:  # Only for Pure ROC search
-                depth_1_candidates = candidates.copy()  # All candidates before pruning
-                depth_1_subgroups = current_subgroups.copy()  # Selected subgroups after pruning
-            
             # Keep track of all subgroups found
             all_subgroups.extend(candidates)
             
@@ -2049,6 +2045,12 @@ def true_roc_search(data, target_col, alphas=None, max_depth=4, min_coverage=50)
                 best_quality = 0
                 avg_coverage = 0
                 depth_auc = 0.0
+            
+            # Store depth 1 candidates (before pruning), subgroups (after pruning), and depth 1 AUC for start_from_pure_roc feature
+            if depth == 1 and alpha is None:  # Only for Pure ROC search
+                depth_1_candidates = candidates.copy()  # All candidates before pruning
+                depth_1_subgroups = current_subgroups.copy()  # Selected subgroups after pruning
+                depth_1_auc = depth_auc  # Store Pure ROC depth 1 AUC for reuse
             
             depth_analysis.append({
                 'depth': depth,
@@ -2109,7 +2111,8 @@ def true_roc_search(data, target_col, alphas=None, max_depth=4, min_coverage=50)
             'depth_analysis': depth_analysis,
             'hull_comparisons': hull_comparisons,
             'depth_1_candidates': depth_1_candidates,  # All candidates at depth 1 (before pruning)
-            'depth_1_subgroups': depth_1_subgroups  # Selected subgroups at depth 1 (after pruning)
+            'depth_1_subgroups': depth_1_subgroups,  # Selected subgroups at depth 1 (after pruning)
+            'depth_1_auc': depth_1_auc if alpha is None else None  # Pure ROC depth 1 AUC for reuse by other methods
         }
         
         print(f"Completed {mode_name}:")
@@ -2144,16 +2147,20 @@ def hull_removal_search(data, target_col, max_depth=3, min_coverage=50, start_fr
     using_pure_roc_start = False
     depth_1_candidates_from_pure_roc = None
     depth_1_subgroups_from_pure_roc = None
+    pure_roc_depth_1_auc = None  # Store Pure ROC depth 1 AUC for reuse
     
     if start_from_pure_roc and isinstance(start_from_pure_roc, dict):
         # Extract candidates (all 120) and subgroups (pruned, e.g., 12) from Pure ROC
         depth_1_candidates_from_pure_roc = start_from_pure_roc.get('candidates', [])
         depth_1_subgroups_from_pure_roc = start_from_pure_roc.get('subgroups', [])
+        pure_roc_depth_1_auc = start_from_pure_roc.get('depth_1_auc', None)  # Get Pure ROC depth 1 AUC
         if depth_1_candidates_from_pure_roc:
             using_pure_roc_start = True
             start_depth = 1
             effective_max_depth = max_depth
             print(f"Starting from Pure ROC depth 1: {len(depth_1_subgroups_from_pure_roc)} pruned subgroups + {len(depth_1_candidates_from_pure_roc)} total candidates")
+            if pure_roc_depth_1_auc is not None:
+                print(f"  Using Pure ROC depth 1 AUC: {pure_roc_depth_1_auc:.4f}")
     
     if not using_pure_roc_start:
         population_stats = calculate_subgroup_stats(data, [], target_col)
@@ -2299,7 +2306,11 @@ def hull_removal_search(data, target_col, max_depth=3, min_coverage=50, start_fr
         avg_coverage = np.mean([sg['coverage'] for sg in current_subgroups]) if current_subgroups else 0
         
         # Calculate AUC at this depth
-        if current_subgroups:
+        # At depth 1, use Pure ROC's depth 1 AUC if available (to ensure consistency)
+        if depth == 1 and pure_roc_depth_1_auc is not None:
+            depth_auc = pure_roc_depth_1_auc
+            print(f"Using Pure ROC depth 1 AUC: {depth_auc:.4f}")
+        elif current_subgroups:
             depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
             depth_auc = calculate_roc_metrics(depth_points)['auc']
         else:
@@ -2386,14 +2397,18 @@ def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_cover
     using_pure_roc_start = False
     depth_1_candidates_from_pure_roc = None
     depth_1_subgroups_from_pure_roc = None
+    pure_roc_depth_1_auc = None  # Store Pure ROC depth 1 AUC for reuse
     
     if start_from_pure_roc and isinstance(start_from_pure_roc, dict):
         # Extract candidates (all 120) and subgroups (pruned, e.g., 12) from Pure ROC
         depth_1_candidates_from_pure_roc = start_from_pure_roc.get('candidates', [])
         depth_1_subgroups_from_pure_roc = start_from_pure_roc.get('subgroups', [])
+        pure_roc_depth_1_auc = start_from_pure_roc.get('depth_1_auc', None)  # Get Pure ROC depth 1 AUC
         if depth_1_candidates_from_pure_roc:
             using_pure_roc_start = True
             print(f"Starting from Pure ROC depth 1: {len(depth_1_subgroups_from_pure_roc)} pruned subgroups + {len(depth_1_candidates_from_pure_roc)} total candidates")
+            if pure_roc_depth_1_auc is not None:
+                print(f"  Using Pure ROC depth 1 AUC: {pure_roc_depth_1_auc:.4f}")
             # We'll use these candidates at depth 1, so start generating new candidates at depth 2
             start_depth = 1
             effective_max_depth = max_depth
@@ -2532,7 +2547,11 @@ def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_cover
         avg_coverage = np.mean([sg['coverage'] for sg in current_subgroups]) if current_subgroups else 0
         
         # Calculate AUC at this depth
-        if current_subgroups:
+        # At depth 1, use Pure ROC's depth 1 AUC if available (to ensure consistency)
+        if depth == 1 and pure_roc_depth_1_auc is not None:
+            depth_auc = pure_roc_depth_1_auc
+            print(f"Using Pure ROC depth 1 AUC: {depth_auc:.4f}")
+        elif current_subgroups:
             depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
             depth_auc = calculate_roc_metrics(depth_points)['auc']
         else:
@@ -2617,14 +2636,18 @@ def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, mi
     using_pure_roc_start = False
     depth_1_candidates_from_pure_roc = None
     depth_1_subgroups_from_pure_roc = None
+    pure_roc_depth_1_auc = None  # Store Pure ROC depth 1 AUC for reuse
     
     if start_from_pure_roc and isinstance(start_from_pure_roc, dict):
         # Extract candidates (all 120) and subgroups (pruned, e.g., 12) from Pure ROC
         depth_1_candidates_from_pure_roc = start_from_pure_roc.get('candidates', [])
         depth_1_subgroups_from_pure_roc = start_from_pure_roc.get('subgroups', [])
+        pure_roc_depth_1_auc = start_from_pure_roc.get('depth_1_auc', None)  # Get Pure ROC depth 1 AUC
         if depth_1_candidates_from_pure_roc:
             using_pure_roc_start = True
             print(f"Starting from Pure ROC depth 1: {len(depth_1_subgroups_from_pure_roc)} pruned subgroups + {len(depth_1_candidates_from_pure_roc)} total candidates")
+            if pure_roc_depth_1_auc is not None:
+                print(f"  Using Pure ROC depth 1 AUC: {pure_roc_depth_1_auc:.4f}")
             # We'll use these candidates at depth 1, so start generating new candidates at depth 2
             start_depth = 1
             effective_max_depth = max_depth
@@ -2763,7 +2786,11 @@ def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, mi
         avg_coverage = np.mean([sg['coverage'] for sg in current_subgroups]) if current_subgroups else 0
         
         # Calculate AUC at this depth
-        if current_subgroups:
+        # At depth 1, use Pure ROC's depth 1 AUC if available (to ensure consistency)
+        if depth == 1 and pure_roc_depth_1_auc is not None:
+            depth_auc = pure_roc_depth_1_auc
+            print(f"Using Pure ROC depth 1 AUC: {depth_auc:.4f}")
+        elif current_subgroups:
             depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
             depth_auc = calculate_roc_metrics(depth_points)['auc']
         else:
@@ -2848,14 +2875,18 @@ def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_d
     using_pure_roc_start = False
     depth_1_candidates_from_pure_roc = None
     depth_1_subgroups_from_pure_roc = None
+    pure_roc_depth_1_auc = None  # Store Pure ROC depth 1 AUC for reuse
     
     if start_from_pure_roc and isinstance(start_from_pure_roc, dict):
         # Extract candidates (all 120) and subgroups (pruned, e.g., 12) from Pure ROC
         depth_1_candidates_from_pure_roc = start_from_pure_roc.get('candidates', [])
         depth_1_subgroups_from_pure_roc = start_from_pure_roc.get('subgroups', [])
+        pure_roc_depth_1_auc = start_from_pure_roc.get('depth_1_auc', None)  # Get Pure ROC depth 1 AUC
         if depth_1_candidates_from_pure_roc:
             using_pure_roc_start = True
             print(f"Starting from Pure ROC depth 1: {len(depth_1_subgroups_from_pure_roc)} pruned subgroups + {len(depth_1_candidates_from_pure_roc)} total candidates")
+            if pure_roc_depth_1_auc is not None:
+                print(f"  Using Pure ROC depth 1 AUC: {pure_roc_depth_1_auc:.4f}")
             # We'll use these candidates at depth 1, so start generating new candidates at depth 2
             start_depth = 1
             effective_max_depth = max_depth
@@ -2992,7 +3023,11 @@ def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_d
         avg_coverage = np.mean([sg['coverage'] for sg in current_subgroups]) if current_subgroups else 0
         
         # Calculate AUC at this depth
-        if current_subgroups:
+        # At depth 1, use Pure ROC's depth 1 AUC if available (to ensure consistency)
+        if depth == 1 and pure_roc_depth_1_auc is not None:
+            depth_auc = pure_roc_depth_1_auc
+            print(f"Using Pure ROC depth 1 AUC: {depth_auc:.4f}")
+        elif current_subgroups:
             depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
             depth_auc = calculate_roc_metrics(depth_points)['auc']
         else:
@@ -3077,14 +3112,18 @@ def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, m
     using_pure_roc_start = False
     depth_1_candidates_from_pure_roc = None
     depth_1_subgroups_from_pure_roc = None
+    pure_roc_depth_1_auc = None  # Store Pure ROC depth 1 AUC for reuse
     
     if start_from_pure_roc and isinstance(start_from_pure_roc, dict):
         # Extract candidates (all 120) and subgroups (pruned, e.g., 12) from Pure ROC
         depth_1_candidates_from_pure_roc = start_from_pure_roc.get('candidates', [])
         depth_1_subgroups_from_pure_roc = start_from_pure_roc.get('subgroups', [])
+        pure_roc_depth_1_auc = start_from_pure_roc.get('depth_1_auc', None)  # Get Pure ROC depth 1 AUC
         if depth_1_candidates_from_pure_roc:
             using_pure_roc_start = True
             print(f"Starting from Pure ROC depth 1: {len(depth_1_subgroups_from_pure_roc)} pruned subgroups + {len(depth_1_candidates_from_pure_roc)} total candidates")
+            if pure_roc_depth_1_auc is not None:
+                print(f"  Using Pure ROC depth 1 AUC: {pure_roc_depth_1_auc:.4f}")
             # We'll use these candidates at depth 1, so start generating new candidates at depth 2
             start_depth = 1
             effective_max_depth = max_depth
@@ -3222,7 +3261,11 @@ def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, m
         avg_coverage = np.mean([sg['coverage'] for sg in current_subgroups]) if current_subgroups else 0
         
         # Calculate AUC at this depth
-        if current_subgroups:
+        # At depth 1, use Pure ROC's depth 1 AUC if available (to ensure consistency)
+        if depth == 1 and pure_roc_depth_1_auc is not None:
+            depth_auc = pure_roc_depth_1_auc
+            print(f"Using Pure ROC depth 1 AUC: {depth_auc:.4f}")
+        elif current_subgroups:
             depth_points = [(sg['fpr'], sg['tpr']) for sg in current_subgroups]
             depth_auc = calculate_roc_metrics(depth_points)['auc']
         else:
@@ -3738,12 +3781,16 @@ def run_batch_analysis(data_dir, alphas=None, depth=3, min_coverage=50, output_d
                 if start_from_pure_roc:
                     pure_roc_depth1_candidates = result['pure_roc'].get('depth_1_candidates', [])
                     pure_roc_depth1_subgroups_list = result['pure_roc'].get('depth_1_subgroups', [])
+                    pure_roc_depth1_auc = result['pure_roc'].get('depth_1_auc', None)  # Get Pure ROC depth 1 AUC
                     if pure_roc_depth1_candidates:
                         pure_roc_depth1_subgroups = {
                             'candidates': pure_roc_depth1_candidates,
-                            'subgroups': pure_roc_depth1_subgroups_list
+                            'subgroups': pure_roc_depth1_subgroups_list,
+                            'depth_1_auc': pure_roc_depth1_auc  # Pass Pure ROC depth 1 AUC to other methods
                         }
                         print(f"Methods 2-6 will start from Pure ROC depth 1 ({len(pure_roc_depth1_candidates)} candidates)")
+                        if pure_roc_depth1_auc is not None:
+                            print(f"  Pure ROC depth 1 AUC: {pure_roc_depth1_auc:.4f}")
                     else:
                         print("Warning: Pure ROC depth 1 data not available")
                         pure_roc_depth1_subgroups = None
