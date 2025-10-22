@@ -3,5 +3,5 @@
   "adaptive_width": 3,
   "algorithm": "true_roc_search",
   "total_candidates": 5458,
-  "search_time": 77.38168525695801
+  "search_time": 39.25555372238159
 }

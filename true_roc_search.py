@@ -88,74 +88,75 @@ def calculate_subgroup_stats(data, conditions, target_col):
     
     # Convert target to binary if needed
     target_values = clean_data[target_col].unique()
-    if len(target_values) == 2 or len(target_values) == 7:
+    if len(target_values) == 2:
         # Convert to binary (1 for positive class, 0 for negative)
-        # For income data, positive class should be high income (gr50K, >50K, etc.)
-        # For credit data, positive class might be '+' or 'good' or '1'
+        # For adult data: pos. class= high income (gr50K, >50K, etc.),
+        # For credit approval: pos. class= '+'; for ionosphere, pos. class= 'good'
         positive_class = None
         for val in target_values:
             val_str = str(val).lower()
-            if any(pattern in val_str for pattern in ['gr', '>50', '+', 'good', 'yes', 'true', 'positive', '2']):
+            if any(pattern in val_str for pattern in ['gr', '>50', '+', 'g', 'yes', 'true', 'positive']):
                 positive_class = val
                 break
         
         # If no obvious positive class, use the less frequent class (minority class)
+        #mushroom:pos. class=p (poisonous), wisconsin, tic-tac-toe: pos. class positive
         if positive_class is None:
             value_counts = clean_data[target_col].value_counts()
             positive_class = value_counts.idxmin()  # Less frequent class
-        
+            
         print(f"Using '{positive_class}' as positive class")
         clean_data_binary = (clean_data[target_col] == positive_class).astype(int)
         subgroup_binary = (subgroup_data[target_col] == positive_class).astype(int)
         
-        target_mean = subgroup_binary.mean()
-        population_mean = clean_data_binary.mean()
-        
-        # Calculate confusion matrix metrics
-        tp = subgroup_binary.sum()
-        fp = (subgroup_binary == 0).sum()
-        
-        # Population totals
-        total_positives = clean_data_binary.sum()
-        total_negatives = (clean_data_binary == 0).sum()
-        
-        tpr = tp / total_positives if total_positives > 0 else 0
-        fpr = fp / total_negatives if total_negatives > 0 else 0
-        
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        
-        return {
-            'conditions': conditions,
-            'coverage': coverage,
-            'coverage_ratio': coverage_ratio,
-            'target_mean': target_mean,
-            'population_mean': population_mean,
-            'lift': target_mean / population_mean if population_mean > 0 else 0,
-            'tp': tp,
-            'fp': fp,
-            'tpr': tpr,
-            'fpr': fpr,
-            'precision': precision
-        }
-    else:
-        # Numeric target
-        target_mean = subgroup_data[target_col].mean()
-        population_mean = data[target_col].mean()
+
+    elif len(target_values) == 7: #for covertype dataset- 
         positive_class = None
         for val in target_values:
             val_str = str(val).lower()
-            if any(pattern in val_str for pattern in ['2000']):
+            if val_str == '2':#Lodgepole Pine(2) is positive class
                 positive_class = val
                 break
+        print(f"Using '{positive_class}' as positive class")
+        clean_data_binary = (clean_data[target_col] == positive_class).astype(int)
+        subgroup_binary = (subgroup_data[target_col] == positive_class).astype(int)
         
-        return {
-            'conditions': conditions,
-            'coverage': coverage,
-            'coverage_ratio': coverage_ratio,
-            'target_mean': target_mean,
-            'population_mean': population_mean,
-            'lift': target_mean / population_mean if population_mean > 0 else 0
-        }
+    else: #for YPMSD dataset, set threshold at year>=2000
+        clean_data_binary=(clean_data[target_col] >=2000).astype(int)
+        subgroup_binary=(subgroup_data[target_col] >=2000).astype(int)
+        print("Thresehold at 2000")        
+        
+    target_mean = subgroup_binary.mean()
+    population_mean = clean_data_binary.mean()
+    
+    # Calculate confusion matrix metrics
+    tp = subgroup_binary.sum()
+    fp = (subgroup_binary == 0).sum()
+    
+    # Population totals
+    total_positives = clean_data_binary.sum()
+    total_negatives = (clean_data_binary == 0).sum()
+    
+    tpr = tp / total_positives if total_positives > 0 else 0
+    fpr = fp / total_negatives if total_negatives > 0 else 0
+    
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    
+    return {
+        'conditions': conditions,
+        'coverage': coverage,
+        'coverage_ratio': coverage_ratio,
+        'target_mean': target_mean,
+        'population_mean': population_mean,
+        'lift': target_mean / population_mean if population_mean > 0 else 0,
+        'tp': tp,
+        'fp': fp,
+        'tpr': tpr,
+        'fpr': fpr,
+        'precision':precision
+    }
+
+    
 
 def roc_quality_measure(tpr, fpr, alpha=None):
     """
