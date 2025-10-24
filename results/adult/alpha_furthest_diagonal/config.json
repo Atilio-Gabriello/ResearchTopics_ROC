@@ -1,7 +1,7 @@
 {
   "alpha": "furthest_diagonal",
-  "adaptive_width": 18,
+  "adaptive_width": 37,
   "algorithm": "true_roc_search",
-  "total_candidates": 4742,
-  "search_time": 14.380553483963013
+  "total_candidates": 5106,
+  "search_time": 17.611112356185913
 }

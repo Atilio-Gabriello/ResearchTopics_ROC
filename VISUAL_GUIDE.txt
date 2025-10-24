@@ -1,0 +1,258 @@
+# Visual Guide: Multi-Parameter Configuration Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    CONFIGURATION SYSTEM                             │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 1. EDIT: run_parallel_datasets.py                                   │
+└─────────────────────────────────────────────────────────────────────┘
+
+DATASET_CONFIGS = {
+    'adult.txt': [
+        ╔══════════════════════════════════════════════════════════╗
+        ║ Config 1: {'n_points': 10, 'distance_below': 1.0, ...}  ║  ← Runs FIRST
+        ╚══════════════════════════════════════════════════════════╝
+        ╔══════════════════════════════════════════════════════════╗
+        ║ Config 2: {'n_points': 15, 'distance_below': 1.5, ...}  ║  ← Runs SECOND
+        ╚══════════════════════════════════════════════════════════╝
+        ╔══════════════════════════════════════════════════════════╗
+        ║ Config 3: {'n_points': 20, 'distance_below': 2.0, ...}  ║  ← Runs THIRD
+        ╚══════════════════════════════════════════════════════════╝
+    ],
+    'mushroom.txt': [
+        ╔══════════════════════════════════════════════════════════╗
+        ║ Config 1: {'n_points': 15, 'distance_below': 1.5, ...}  ║  ← Only config
+        ╚══════════════════════════════════════════════════════════╝
+    ],
+}
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 2. RUN: python run_parallel_datasets.py                             │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────┐  ┌────────────────────────────┐
+│  Terminal: adult.txt       │  │  Terminal: mushroom.txt    │
+│  [Runs SEQUENTIALLY]       │  │  [Runs in PARALLEL]        │
+├────────────────────────────┤  ├────────────────────────────┤
+│                            │  │                            │
+│  ⏱️ Config 1 (n=10)        │  │  ⏱️ Config 1 (n=15)        │
+│  ├─ Method 1: Pure ROC     │  │  ├─ Method 1: Pure ROC     │
+│  ├─ Method 2: Hull Removal │  │  ├─ Method 2: Hull Removal │
+│  ├─ Method 3: Closest(10)  │  │  ├─ Method 3: Closest(15)  │
+│  ├─ Method 4: Furthest(10) │  │  ├─ Method 4: Furthest(15) │
+│  ├─ Method 5: Below(1.0%)  │  │  ├─ Method 5: Below(1.5%)  │
+│  └─ Method 6: Above(10%)   │  │  └─ Method 6: Above(8%)    │
+│     ⏱️ ~10 min              │  │     ⏱️ ~10 min              │
+│           ↓                │  │           ↓                │
+│  ⏱️ Config 2 (n=15)        │  │  ✅ DONE!                  │
+│  ├─ Method 1: Pure ROC     │  │                            │
+│  ├─ Method 2: Hull Removal │  │  Saved to:                 │
+│  ├─ Method 3: Closest(15)  │  │  ./results/mushroom/       │
+│  ├─ Method 4: Furthest(15) │  │                            │
+│  ├─ Method 5: Below(1.5%)  │  └────────────────────────────┘
+│  └─ Method 6: Above(8%)    │
+│     ⏱️ ~10 min              │
+│           ↓                │
+│  ⏱️ Config 3 (n=20)        │
+│  ├─ Method 1: Pure ROC     │
+│  ├─ Method 2: Hull Removal │
+│  ├─ Method 3: Closest(20)  │
+│  ├─ Method 4: Furthest(20) │
+│  ├─ Method 5: Below(2.0%)  │
+│  └─ Method 6: Above(5%)    │
+│     ⏱️ ~10 min              │
+│           ↓                │
+│  ✅ DONE! (~30 min total)  │
+│                            │
+│  Saved to:                 │
+│  ./results/config_0/adult/ │
+│  ./results/config_1/adult/ │
+│  ./results/config_2/adult/ │
+└────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 3. RESULTS: File Structure                                          │
+└─────────────────────────────────────────────────────────────────────┘
+
+./results/
+├── config_0/              ← First configuration
+│   ├── adult/
+│   │   ├── depth_analysis.csv
+│   │   ├── depth_comparison.csv
+│   │   ├── true_roc_comparison.csv
+│   │   └── alpha_pure_roc/
+│   │       └── ... (detailed results)
+│   └── mushroom/
+│       └── ... (similar structure)
+│
+├── config_1/              ← Second configuration (only adult.txt)
+│   └── adult/
+│       └── ... (same structure)
+│
+└── config_2/              ← Third configuration (only adult.txt)
+    └── adult/
+        └── ... (same structure)
+
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ PARAMETER FLOW DIAGRAM                                              │
+└─────────────────────────────────────────────────────────────────────┘
+
+                    ┌─────────────────────┐
+                    │ DATASET_CONFIGS     │
+                    │ (in run_parallel)   │
+                    └──────────┬──────────┘
+                               │
+                               ↓
+              ┌────────────────┴────────────────┐
+              │  run_dataset_in_terminal()      │
+              │  • Extracts n_points            │
+              │  • Extracts distance_below      │
+              │  • Extracts distance_above      │
+              └────────────────┬────────────────┘
+                               │
+                               ↓
+              ┌────────────────┴────────────────┐
+              │  PowerShell Command             │
+              │  python true_roc_search.py \    │
+              │    --n-points 10 \              │
+              │    --distance-below 1.0 \       │
+              │    --distance-above 10.0        │
+              └────────────────┬────────────────┘
+                               │
+                               ↓
+              ┌────────────────┴────────────────┐
+              │  true_roc_search.py             │
+              │  • Parses arguments             │
+              │  • Calls run_batch_analysis()   │
+              └────────────────┬────────────────┘
+                               │
+                               ↓
+              ┌────────────────┴────────────────┐
+              │  run_batch_analysis()           │
+              │  • Uses custom_n_points         │
+              │  • Uses custom_distance_below   │
+              │  • Uses custom_distance_above   │
+              └────────────────┬────────────────┘
+                               │
+                ┌──────────────┼──────────────┐
+                │              │              │
+                ↓              ↓              ↓
+         ┌──────────┐   ┌──────────┐   ┌──────────┐
+         │ Method 3 │   │ Method 4 │   │ Method 5 │
+         │ (n_pts)  │   │ (n_pts)  │   │ (dist_↓) │
+         └──────────┘   └──────────┘   └──────────┘
+                                              ↓
+                                        ┌──────────┐
+                                        │ Method 6 │
+                                        │ (dist_↑) │
+                                        └──────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ TIMING DIAGRAM                                                       │
+└─────────────────────────────────────────────────────────────────────┘
+
+Parallel Processing (Different Datasets):
+┌──────────────────────────────────────────────────────────┐
+│ Dataset A ████████████████ (10 min)                      │
+│ Dataset B ████████████████ (10 min)                      │ All run
+│ Dataset C ████████████████ (10 min)                      │ at same
+└──────────────────────────────────────────────────────────┘ time!
+           Total Time: ~10 minutes
+
+
+Sequential Processing (Multiple Configs on Same Dataset):
+┌──────────────────────────────────────────────────────────┐
+│ Config 1 ████████ (10 min)                               │
+│                    Config 2 ████████ (10 min)            │  Run one
+│                                        Config 3 ████████  │  after
+└──────────────────────────────────────────────────────────┘  another
+           Total Time: ~30 minutes
+
+
+Combined (2 datasets, 3 configs each):
+┌──────────────────────────────────────────────────────────┐
+│ A-Cfg1 ████ A-Cfg2 ████ A-Cfg3 ████                      │
+│ B-Cfg1 ████ B-Cfg2 ████ B-Cfg3 ████                      │  Parallel
+└──────────────────────────────────────────────────────────┘  datasets
+           Total Time: ~30 minutes (same as single dataset)
+
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ DECISION TREE: Which Approach to Use?                               │
+└─────────────────────────────────────────────────────────────────────┘
+
+                    Do you need different
+                    parameters per dataset?
+                           │
+              ┌────────────┴────────────┐
+              │ YES                     │ NO
+              ↓                         ↓
+   Use DATASET_CONFIGS          Use command-line
+   in run_parallel.py           override:
+   ┌───────────────────┐        python ... --n-points 15
+   │ 'adult.txt': [    │
+   │   {'n_points':10} │        All datasets get
+   │ ],                │        same parameters
+   │ 'mushroom.txt': [ │
+   │   {'n_points':15} │
+   │ ]                 │
+   └───────────────────┘
+              ↓
+   Do you need multiple
+   configs per dataset?
+              │
+      ┌───────┴───────┐
+      │ YES           │ NO
+      ↓               ↓
+   Add multiple    Single config
+   configs:        per dataset:
+   ┌─────────┐     ┌─────────┐
+   │ [       │     │ [       │
+   │  {cfg1},│     │  {cfg1} │
+   │  {cfg2},│     │ ]       │
+   │  {cfg3} │     └─────────┘
+   │ ]       │
+   └─────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ QUICK EXAMPLES                                                       │
+└─────────────────────────────────────────────────────────────────────┘
+
+Example 1: Test one parameter (n_points)
+─────────────────────────────────────────
+DATASET_CONFIGS = {
+    'adult.txt': [
+        {'n_points': 10, 'distance_below': 1.0, 'distance_above': 10.0},
+        {'n_points': 15, 'distance_below': 1.0, 'distance_above': 10.0}, ← Same
+        {'n_points': 20, 'distance_below': 1.0, 'distance_above': 10.0}, ← Same
+    ],                                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+}                                         Keep these constant
+
+
+Example 2: Compare strategies
+─────────────────────────────────────────
+DATASET_CONFIGS = {
+    'adult.txt': [
+        {'n_points': 8,  'distance_below': 0.5, 'distance_above': 15.0}, ← Conservative
+        {'n_points': 20, 'distance_below': 2.5, 'distance_above': 5.0},  ← Aggressive
+    ],
+}
+
+
+Example 3: Different configs for different datasets
+─────────────────────────────────────────
+DATASET_CONFIGS = {
+    'ionosphere.txt': [  # Small dataset
+        {'n_points': 8, ...},
+    ],
+    'Covertype.txt': [   # Large dataset
+        {'n_points': 20, ...},
+        {'n_points': 25, ...},  # Try larger value
+    ],
+}
+```
