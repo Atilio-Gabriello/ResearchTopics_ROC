@@ -13,7 +13,10 @@ Key differences from enhanced_roc_search.py:
 """
 ## TODO
 
-## Implement a change on each of the methods to store the points on the curve and then doing the calculation that we need, after that we re-add those points together with the new ones that we have based on the calculation result
+## Fix the hull removal to always have more points than the first depth
+## Fix the n_closest points and n_furthest points returning less than n_points in some cases
+## Add the time for each depth level, and add that to the consolidated results
+## Run the all the methods for Covertype and YPMSD to run in parallel instead of one after the other
 
 import pandas as pd
 import numpy as np
@@ -105,7 +108,7 @@ def calculate_subgroup_stats(data, conditions, target_col):
             value_counts = clean_data[target_col].value_counts()
             positive_class = value_counts.idxmin()  # Less frequent class
             
-        print(f"Using '{positive_class}' as positive class")
+        # print(f"Using '{positive_class}' as positive class")
         clean_data_binary = (clean_data[target_col] == positive_class).astype(int)
         subgroup_binary = (subgroup_data[target_col] == positive_class).astype(int)
         
@@ -117,14 +120,14 @@ def calculate_subgroup_stats(data, conditions, target_col):
             if val_str == '2':#Lodgepole Pine(2) is positive class
                 positive_class = val
                 break
-        print(f"Using '{positive_class}' as positive class")
+        # print(f"Using '{positive_class}' as positive class")
         clean_data_binary = (clean_data[target_col] == positive_class).astype(int)
         subgroup_binary = (subgroup_data[target_col] == positive_class).astype(int)
         
     else: #for YPMSD dataset, set threshold at year>=2000
         clean_data_binary=(clean_data[target_col] >=2000).astype(int)
         subgroup_binary=(subgroup_data[target_col] >=2000).astype(int)
-        print("Thresehold at 2000")        
+        # print("Thresehold at 2000")        
         
     target_mean = subgroup_binary.mean()
     population_mean = clean_data_binary.mean()
@@ -277,7 +280,7 @@ def calculate_roc_metrics(points):
     }
 
 # Change this function to keep the points of the original curve, keep them at each level
-def remove_hull_points_and_recalculate(points, return_details=False):
+def remove_hull_points_and_recalculate(points, return_details=False, keep_all_remaining=False):
     """
     Remove points on the original convex hull temporarily, recalculate hull with remaining points,
     then combine original hull points with new hull points and return the final hull.
@@ -286,12 +289,14 @@ def remove_hull_points_and_recalculate(points, return_details=False):
     1. Identify original hull points
     2. Remove hull points temporarily from candidate pool
     3. Calculate new hull from remaining points
-    4. Combine original hull + new hull points
+    4. Combine original hull + new hull points (or ALL remaining if keep_all_remaining=True)
     5. Return final hull from combined set
     
     Args:
         points: Array of (fpr, tpr) points, shape (n, 2)
         return_details: If True, return detailed comparison information
+        keep_all_remaining: If True, return original_hull + ALL remaining points (for depth 1)
+                           If False, return original_hull + new_hull only (for depth 2+)
     
     Returns:
         If return_details=False: Array of final hull points from combined set
@@ -374,15 +379,20 @@ def remove_hull_points_and_recalculate(points, return_details=False):
         # Calculate new hull area
         new_hull_area = new_hull.volume
         
-        # MODIFICATION: Combine original hull points with new hull points
-        combined_points = np.vstack([original_hull_points, new_hull_points])
+        # MODIFICATION: Combine based on keep_all_remaining parameter
+        if keep_all_remaining:
+            # For depth 1: Keep original hull + ALL remaining points (broad exploration)
+            combined_points = np.vstack([original_hull_points, remaining_points])
+        else:
+            # For depth 2+: Keep original hull + new hull only (controlled growth)
+            combined_points = np.vstack([original_hull_points, new_hull_points])
         
-        # Calculate final hull from combined points
+        # Calculate final hull from combined points (for metrics)
         final_extended_points = np.vstack([[0, 0], combined_points, [1, 1]])
         final_hull = ConvexHull(final_extended_points)
         final_hull_indices = set(final_hull.vertices)
         
-        # Get final hull points (excluding anchors)
+        # Get final hull points (excluding anchors) - for metrics only
         final_hull_points_indices = [i - 1 for i in final_hull_indices 
                                      if 1 <= i <= len(combined_points)]
         final_hull_points = combined_points[final_hull_points_indices]
@@ -726,17 +736,17 @@ def select_furthest_points_from_diagonal(points, n_points, return_details=False,
     # Filter to only points above diagonal (TPR > FPR)
     above_diagonal = points_array[points_array[:, 1] > points_array[:, 0]]
     
-    if len(above_diagonal) < 3:
-        if return_details:
-            return {
-                'original_hull': above_diagonal,
-                'new_hull': np.array([]),
-                'selected_points': above_diagonal,
-                'all_points': above_diagonal,
-                'original_hull_area': 0,
-                'new_hull_area': 0
-            }
-        return np.array([])
+    # if len(above_diagonal) < 3:
+    #     if return_details:
+    #         return {
+    #             'original_hull': above_diagonal,
+    #             'new_hull': np.array([]),
+    #             'selected_points': above_diagonal,
+    #             'all_points': above_diagonal,
+    #             'original_hull_area': 0,
+    #             'new_hull_area': 0
+    #         }
+    #     return np.array([])
     
     # Calculate original convex hull
     extended_points = np.vstack([[0, 0], above_diagonal, [1, 1]])
@@ -1590,8 +1600,8 @@ def plot_hull_comparison(hull_data, depth, output_path=None, title_suffix=""):
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         print(f"Saved hull comparison plot to: {output_path}")
     
-    plt.show()
-    plt.close()
+    # plt.show()
+    # plt.close()
     
     # Print detailed statistics
     print(f"\n=== Hull Comparison Statistics (Depth {depth}) ===")
@@ -1870,14 +1880,14 @@ def generate_candidates(data, target_col, current_subgroups, depth, min_coverage
         candidates = sorted(candidates, key=lambda x: x.get('roc_quality', 0), reverse=True)[:max_candidates]
 
     subgroups = np.array(subgroups)
-    print(subgroups)
+    # print(subgroups)
     # In order to calculate the convex hull above the diagonal we need to filter to only points above the diagonal (TPR > FPR)
     ch_eligible = subgroups[subgroups[:, 1] > subgroups[:, 0]]
-    print(ch_eligible)
+    # print(ch_eligible)
 
     # Add anchor points (0, 0) and (1, 1) to the set
     hull_points = np.vstack([[0, 0], ch_eligible, [1, 1]])
-    print(hull_points)
+    # print(hull_points)
 
     # Compute convex hull
     hull = ConvexHull(hull_points)
@@ -1974,6 +1984,7 @@ def true_roc_search(data, target_col, alphas=None, max_depth=4, min_coverage=50)
         })
         
         for depth in range(1, max_depth + 1):
+            depth_start_time = time.time()  # Start timing for this depth
             print(f"Depth {depth}: Starting with {len(current_subgroups)} subgroups")
             depth_start_subgroups = len(current_subgroups)
             
@@ -2053,6 +2064,8 @@ def true_roc_search(data, target_col, alphas=None, max_depth=4, min_coverage=50)
                 depth_1_subgroups = current_subgroups.copy()  # Selected subgroups after pruning
                 depth_1_auc = depth_auc  # Store Pure ROC depth 1 AUC for reuse
             
+            depth_time = time.time() - depth_start_time  # Calculate time for this depth
+            
             depth_analysis.append({
                 'depth': depth,
                 'subgroups_start': depth_start_subgroups,
@@ -2062,7 +2075,8 @@ def true_roc_search(data, target_col, alphas=None, max_depth=4, min_coverage=50)
                 'best_quality': best_quality,
                 'avg_coverage': avg_coverage,
                 'cumulative_candidates': candidates_explored,
-                'depth_auc': depth_auc
+                'depth_auc': depth_auc,
+                'depth_time': depth_time
             })
             
             if not current_subgroups:
@@ -2201,6 +2215,7 @@ def hull_removal_search(data, target_col, max_depth=3, min_coverage=50, start_fr
         })
     
     for depth in range(start_depth, effective_max_depth + 1):
+        depth_start_time = time.time()  # Start timing for this depth
         print(f"\n--- Depth {depth} ---")
         
         # Special handling for depth 1 when using Pure ROC start
@@ -2232,22 +2247,24 @@ def hull_removal_search(data, target_col, max_depth=3, min_coverage=50, start_fr
         
         # Apply hull removal selection strategy
         if depth == 1 and using_pure_roc_start:
-            # At depth 1 with Pure ROC start: combine Pure ROC's pruned subgroups + non-hull points
+            # At depth 1 with Pure ROC start: Apply hull removal directly to all candidates
+            # Do NOT combine with Pure ROC's selection - hull removal is independent
             print(f"Depth 1: Applying hull removal to {len(candidate_subgroups)} candidates from Pure ROC")
             
-            # Apply hull removal on all depth 1 candidates to find non-hull points
+            # Apply hull removal on all depth 1 candidates
             candidate_points = np.array([(sg['fpr'], sg['tpr']) for sg in candidate_subgroups])
             
             if len(candidate_points) >= 3:
-                hull_data = remove_hull_points_and_recalculate(candidate_points, return_details=True)
+                # At depth 1: keep ALL remaining points for broad exploration
+                hull_data = remove_hull_points_and_recalculate(candidate_points, return_details=True, keep_all_remaining=True)
                 hull_data['depth'] = depth
                 hull_comparisons.append(hull_data)
                 
-                # Get combined_points from hull removal (non-hull points)
+                # Get combined_points from hull removal (original hull + new hull)
                 combined_points = hull_data.get('combined_points', np.array([]))
                 
                 if len(combined_points) > 0:
-                    # Find subgroups corresponding to non-hull points
+                    # Find subgroups corresponding to combined points
                     selected_subgroups = []
                     combined_set = set(map(lambda pt: (round(pt[0], 6), round(pt[1], 6)), combined_points))
                     
@@ -2256,29 +2273,30 @@ def hull_removal_search(data, target_col, max_depth=3, min_coverage=50, start_fr
                         if sg_point in combined_set:
                             selected_subgroups.append(sg)
                     
-                    # Combine Pure ROC's pruned subgroups + non-hull points
-                    current_subgroups = depth_1_subgroups_from_pure_roc.copy()
-                    pure_roc_points = set(map(lambda sg: (round(sg['fpr'], 6), round(sg['tpr'], 6)), current_subgroups))
+                    # Use selected_subgroups directly (no combination with Pure ROC)
+                    current_subgroups = selected_subgroups
                     
-                    for sg in selected_subgroups:
-                        sg_point = (round(sg['fpr'], 6), round(sg['tpr'], 6))
-                        if sg_point not in pure_roc_points:
-                            current_subgroups.append(sg)
+                    # Get counts for logging
+                    original_hull_count = hull_data.get('original_num_subgroups', 0)
+                    new_hull_count = hull_data.get('new_num_subgroups', 0)
                     
-                    print(f"After hull removal: {len(depth_1_subgroups_from_pure_roc)} Pure ROC + {len(current_subgroups) - len(depth_1_subgroups_from_pure_roc)} non-hull = {len(current_subgroups)} total")
+                    print(f"After hull removal: {original_hull_count} original hull + {new_hull_count} new hull = {len(current_subgroups)} total")
                 else:
-                    current_subgroups = depth_1_subgroups_from_pure_roc.copy()
+                    # Fallback: use all candidates
+                    current_subgroups = candidate_subgroups
             else:
-                current_subgroups = depth_1_subgroups_from_pure_roc.copy()
+                # Not enough points for hull calculation
+                current_subgroups = candidate_subgroups
         else:
             # Normal processing: combine previous depth's subgroups with new candidates before selection
             combined_subgroups = current_subgroups + candidate_subgroups
             
-            # Apply hull removal pruning - MODIFIED: Keep hull points instead of removing them
+            # Apply hull removal pruning - Keep original hull + new hull only (not all remaining)
             roc_points = np.array([(sg['fpr'], sg['tpr']) for sg in combined_subgroups])
             
             if len(roc_points) >= 3:
-                hull_data = remove_hull_points_and_recalculate(roc_points, return_details=True)
+                # At depth 2+: keep original hull + new hull only (controlled growth)
+                hull_data = remove_hull_points_and_recalculate(roc_points, return_details=True, keep_all_remaining=False)
                 hull_data['depth'] = depth
                 hull_comparisons.append(hull_data)
                 
@@ -2317,6 +2335,8 @@ def hull_removal_search(data, target_col, max_depth=3, min_coverage=50, start_fr
         else:
             depth_auc = 0.0
         
+        depth_time = time.time() - depth_start_time  # Calculate time for this depth
+        
         depth_analysis.append({
             'depth': depth,
             'subgroups_start': len(candidate_subgroups),
@@ -2326,7 +2346,8 @@ def hull_removal_search(data, target_col, max_depth=3, min_coverage=50, start_fr
             'best_quality': best_quality,
             'avg_coverage': avg_coverage,
             'cumulative_candidates': candidates_explored,
-            'depth_auc': depth_auc
+            'depth_auc': depth_auc,
+            'depth_time': depth_time
         })
         
         print(f"After hull removal: {len(candidate_subgroups)} -> {width} subgroups")
@@ -2454,6 +2475,7 @@ def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_cover
         })
     
     for depth in range(start_depth, effective_max_depth + 1):
+        depth_start_time = time.time()  # Start timing for this depth
         print(f"\n--- Depth {depth} ---")
         
         # Special handling for depth 1 when using Pure ROC start
@@ -2530,18 +2552,20 @@ def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_cover
                     current_subgroups = depth_1_subgroups_from_pure_roc.copy() + selected_subgroups
                     print(f"After closest-to-hull selection: {len(depth_1_subgroups_from_pure_roc)} Pure ROC + {len(selected_subgroups)} closest = {len(current_subgroups)} total")
                 else:
-                    current_subgroups = selected_subgroups if selected_subgroups else candidate_subgroups[:n_points]
-                    print(f"After closest-to-hull selection: {len(candidate_subgroups)} -> {len(current_subgroups)} subgroups")
+                    # Use ALL selected_subgroups (which includes original hull + n selected points)
+                    current_subgroups = selected_subgroups
+                    print(f"After closest-to-hull selection: {len(candidate_subgroups)} -> {len(current_subgroups)} subgroups (hull + {n_points} closest)")
             else:
-                current_subgroups = candidate_subgroups[:n_points]
+                current_subgroups = candidate_subgroups[:n_points+n_points]
                 print(f"Keeping top {len(current_subgroups)} subgroups")
         else:
-            current_subgroups = candidate_subgroups[:n_points]
+            current_subgroups = candidate_subgroups[:n_points+5]
             print(f"Not enough points for hull, keeping top {len(current_subgroups)} subgroups")
         
-        # Apply adaptive pruning to limit width (skip at depth 1 when using Pure ROC start to preserve combined width)
-        if not (using_pure_roc_start and depth == 1):
-            current_subgroups = adaptive_roc_pruning(current_subgroups, alpha=None)
+        # Skip adaptive pruning for closest-to-hull search to preserve intended width
+        # The hull selection already implements the pruning strategy
+        # if not (using_pure_roc_start and depth == 1):
+        #     current_subgroups = adaptive_roc_pruning(current_subgroups, alpha=None)
         
         width = len(current_subgroups)
         best_quality = max([sg['roc_quality'] for sg in current_subgroups]) if current_subgroups else 0
@@ -2558,6 +2582,8 @@ def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_cover
         else:
             depth_auc = 0.0
         
+        depth_time = time.time() - depth_start_time  # Calculate time for this depth
+        
         depth_analysis.append({
             'depth': depth,
             'subgroups_start': len(candidate_subgroups),
@@ -2567,7 +2593,8 @@ def closest_to_hull_search(data, target_col, n_points=10, max_depth=3, min_cover
             'best_quality': best_quality,
             'avg_coverage': avg_coverage,
             'cumulative_candidates': candidates_explored,
-            'depth_auc': depth_auc
+            'depth_auc': depth_auc,
+            'depth_time': depth_time
         })
     
     # Calculate final results
@@ -2693,6 +2720,7 @@ def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, mi
         })
     
     for depth in range(start_depth, effective_max_depth + 1):
+        depth_start_time = time.time()  # Start timing for this depth
         print(f"\n--- Depth {depth} ---")
         
         # Special handling for depth 1 when using Pure ROC start
@@ -2778,9 +2806,10 @@ def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, mi
             current_subgroups = candidate_subgroups[:n_points]
             print(f"Not enough points for hull, keeping top {len(current_subgroups)} subgroups")
         
-        # Apply adaptive pruning to limit width (skip at depth 1 when using Pure ROC start to preserve combined width)
-        if not (using_pure_roc_start and depth == 1):
-            current_subgroups = adaptive_roc_pruning(current_subgroups, alpha=None)
+        # Skip adaptive pruning for furthest-from-diagonal search to preserve intended width
+        # The diagonal selection already implements the pruning strategy
+        # if not (using_pure_roc_start and depth == 1):
+        #     current_subgroups = adaptive_roc_pruning(current_subgroups, alpha=None)
         
         width = len(current_subgroups)
         best_quality = max([sg['roc_quality'] for sg in current_subgroups]) if current_subgroups else 0
@@ -2797,6 +2826,8 @@ def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, mi
         else:
             depth_auc = 0.0
         
+        depth_time = time.time() - depth_start_time  # Calculate time for this depth
+        
         depth_analysis.append({
             'depth': depth,
             'subgroups_start': len(candidate_subgroups),
@@ -2806,7 +2837,8 @@ def furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=3, mi
             'best_quality': best_quality,
             'avg_coverage': avg_coverage,
             'cumulative_candidates': candidates_explored,
-            'depth_auc': depth_auc
+            'depth_auc': depth_auc,
+            'depth_time': depth_time
         })
     
     # Calculate final results
@@ -2932,6 +2964,7 @@ def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_d
         })
     
     for depth in range(start_depth, effective_max_depth + 1):
+        depth_start_time = time.time()  # Start timing for this depth
         print(f"\n--- Depth {depth} ---")
         
         # Special handling for depth 1 when using Pure ROC start
@@ -3034,6 +3067,8 @@ def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_d
         else:
             depth_auc = 0.0
         
+        depth_time = time.time() - depth_start_time  # Calculate time for this depth
+        
         depth_analysis.append({
             'depth': depth,
             'subgroups_start': len(candidate_subgroups),
@@ -3043,7 +3078,8 @@ def below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_d
             'best_quality': best_quality,
             'avg_coverage': avg_coverage,
             'cumulative_candidates': candidates_explored,
-            'depth_auc': depth_auc
+            'depth_auc': depth_auc,
+            'depth_time': depth_time
         })
     
     # Calculate final results
@@ -3169,6 +3205,7 @@ def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, m
         })
     
     for depth in range(start_depth, effective_max_depth + 1):
+        depth_start_time = time.time()  # Start timing for this depth
         print(f"\n--- Depth {depth} ---")
         
         # Special handling for depth 1 when using Pure ROC start
@@ -3272,6 +3309,8 @@ def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, m
         else:
             depth_auc = 0.0
         
+        depth_time = time.time() - depth_start_time  # Calculate time for this depth
+        
         depth_analysis.append({
             'depth': depth,
             'subgroups_start': len(candidate_subgroups),
@@ -3281,7 +3320,8 @@ def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, m
             'best_quality': best_quality,
             'avg_coverage': avg_coverage,
             'cumulative_candidates': candidates_explored,
-            'depth_auc': depth_auc
+            'depth_auc': depth_auc,
+            'depth_time': depth_time
         })
     
     # Calculate final results
@@ -3327,7 +3367,6 @@ def above_diagonal_threshold_search(data, target_col, distance_percentage=1.0, m
     
     return None
 
-
 def create_depth_analysis_table(results, output_dir):
     """Create and save depth-by-depth analysis table."""
     # Collect all depth data across different alphas
@@ -3361,7 +3400,7 @@ def create_depth_analysis_table(results, output_dir):
         'algorithm', 'alpha_value', 'depth', 'subgroups_start', 
         'candidates_generated', 'subgroups_after_pruning', 'width',
         'best_quality', 'avg_coverage', 'cumulative_candidates',
-        'depth_auc','final_auc', 'final_width'
+        'depth_auc', 'depth_time', 'final_auc', 'final_width'
     ]
     depth_df = depth_df[column_order]
     
@@ -3713,7 +3752,8 @@ def preprocess_categorical_data(df):
     
     return df_processed
 
-def run_batch_analysis(data_dir, alphas=None, depth=3, min_coverage=50, output_dir='./runs/batch_analysis', start_from_pure_roc=False):
+def run_batch_analysis(data_dir, alphas=None, depth=3, min_coverage=50, output_dir='./runs/batch_analysis', start_from_pure_roc=False,
+                       custom_n_points=None, custom_distance_below=None, custom_distance_above=None):
     """
     Run ROC search on multiple datasets and consolidate results.
     
@@ -3724,6 +3764,9 @@ def run_batch_analysis(data_dir, alphas=None, depth=3, min_coverage=50, output_d
         min_coverage: Minimum subgroup coverage
         output_dir: Output directory for consolidated results
         start_from_pure_roc: If True, methods 2-6 will start from Pure ROC's depth 1 result
+        custom_n_points: Override n_points for methods 3&4 (if None, uses default 10)
+        custom_distance_below: Override distance_percentage for method 5 (if None, uses default 1.0)
+        custom_distance_above: Override distance_percentage for method 6 (if None, uses default 10.0)
     
     Returns:
         Dictionary containing consolidated results
@@ -3733,12 +3776,18 @@ def run_batch_analysis(data_dir, alphas=None, depth=3, min_coverage=50, output_d
     all_depth_analysis = []
     all_summaries = []
     
+    # Set default values if not provided
+    n_points = custom_n_points if custom_n_points is not None else 10
+    distance_below = custom_distance_below if custom_distance_below is not None else 1.0
+    distance_above = custom_distance_above if custom_distance_above is not None else 10.0
+    
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
     
     print("=== Batch ROC Analysis ===")
     print(f"Processing datasets from: {data_dir}")
     print(f"Output directory: {output_dir}")
+    print(f"Parameters: n_points={n_points}, distance_below={distance_below}%, distance_above={distance_above}%")
     
     # Process each dataset
     for filename, target_col in dataset_info.items():
@@ -3805,35 +3854,39 @@ def run_batch_analysis(data_dir, alphas=None, depth=3, min_coverage=50, output_d
             dataset_results['hull_removal'] = result
         
         # Method 3: Closest to Hull Search
-        print("\n>>> Method 3: Closest to Hull Search")
-        result = closest_to_hull_search(data, target_col, n_points=10, max_depth=depth, min_coverage=min_coverage, 
+        print(f"\n>>> Method 3: Closest to Hull Search (n_points={n_points})")
+        result = closest_to_hull_search(data, target_col, n_points=n_points, max_depth=depth, min_coverage=min_coverage, 
                                        start_from_pure_roc=pure_roc_depth1_subgroups)
         if result:
             result['dataset'] = dataset_name
+            result['n_points_used'] = n_points
             dataset_results['closest_to_hull'] = result
         
         # Method 4: Furthest from Diagonal Search
-        print("\n>>> Method 4: Furthest from Diagonal Search")
-        result = furthest_from_diagonal_search(data, target_col, n_points=10, max_depth=depth, min_coverage=min_coverage,
+        print(f"\n>>> Method 4: Furthest from Diagonal Search (n_points={n_points})")
+        result = furthest_from_diagonal_search(data, target_col, n_points=n_points, max_depth=depth, min_coverage=min_coverage,
                                               start_from_pure_roc=pure_roc_depth1_subgroups)
         if result:
             result['dataset'] = dataset_name
+            result['n_points_used'] = n_points
             dataset_results['furthest_diagonal'] = result
         
         # Method 5: Below Hull Threshold Search
-        print("\n>>> Method 5: Below Hull Threshold Search")
-        result = below_hull_threshold_search(data, target_col, distance_percentage=1.0, max_depth=depth, min_coverage=min_coverage,
+        print(f"\n>>> Method 5: Below Hull Threshold Search (distance={distance_below}%)")
+        result = below_hull_threshold_search(data, target_col, distance_percentage=distance_below, max_depth=depth, min_coverage=min_coverage,
                                             start_from_pure_roc=pure_roc_depth1_subgroups)
         if result:
             result['dataset'] = dataset_name
+            result['distance_percentage_used'] = distance_below
             dataset_results['below_hull'] = result
         
         # Method 6: Above Diagonal Threshold Search
-        print("\n>>> Method 6: Above Diagonal Threshold Search")
-        result = above_diagonal_threshold_search(data, target_col, distance_percentage=10.0, max_depth=depth, min_coverage=min_coverage,
+        print(f"\n>>> Method 6: Above Diagonal Threshold Search (distance={distance_above}%)")
+        result = above_diagonal_threshold_search(data, target_col, distance_percentage=distance_above, max_depth=depth, min_coverage=min_coverage,
                                                 start_from_pure_roc=pure_roc_depth1_subgroups)
         if result:
             result['dataset'] = dataset_name
+            result['distance_percentage_used'] = distance_above
             dataset_results['above_diagonal'] = result
         
         if not dataset_results:
@@ -4042,6 +4095,14 @@ def main():
     parser.add_argument('--start-from-pure-roc', action='store_true',
                        help='Methods 2-6 start from Pure ROC depth 1 result (batch mode only)')
     
+    # Parameters for customizing search methods (batch mode)
+    parser.add_argument('--n-points', type=int, default=None,
+                       help='n_points for closest_to_hull and furthest_from_diagonal methods (batch mode)')
+    parser.add_argument('--distance-below', type=float, default=None,
+                       help='distance_percentage for below_hull_threshold method (batch mode)')
+    parser.add_argument('--distance-above', type=float, default=None,
+                       help='distance_percentage for above_diagonal_threshold method (batch mode)')
+    
     args = parser.parse_args()
     
     # Determine search mode
@@ -4062,6 +4123,12 @@ def main():
         print(f"Output: {args.output}")
         if args.start_from_pure_roc:
             print(f"Starting methods 2-6 from Pure ROC depth 1 result: YES")
+        if args.n_points is not None:
+            print(f"Custom n_points: {args.n_points}")
+        if args.distance_below is not None:
+            print(f"Custom distance_below: {args.distance_below}%")
+        if args.distance_above is not None:
+            print(f"Custom distance_above: {args.distance_above}%")
         
         results = run_batch_analysis(
             args.data_dir, 
@@ -4069,7 +4136,10 @@ def main():
             args.depth, 
             args.min_coverage, 
             args.output,
-            args.start_from_pure_roc
+            args.start_from_pure_roc,
+            custom_n_points=args.n_points,
+            custom_distance_below=args.distance_below,
+            custom_distance_above=args.distance_above
         )
         
         if results:
