@@ -4,3 +4,13 @@ __pycache__
 .ignore
 tests/YPMSD.txt
 temp/YPMSD.txt
+results/adult
+results/config_1
+results/config_2
+results/Covertype
+results/Credit-a
+results/ionosphere
+results/mushroom
+results/tic-tac-toe
+results/wisconsin
+results/YPMSD
